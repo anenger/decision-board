@@ -1,5 +1,4 @@
-//  @ts-check
-
 import { tanstackConfig } from '@tanstack/eslint-config'
+import { globalIgnores } from 'eslint/config'
 
-export default [...tanstackConfig]
+export default [globalIgnores(['convex/_generated/**']), ...tanstackConfig]

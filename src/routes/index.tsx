@@ -1,118 +1,234 @@
 import { createFileRoute } from '@tanstack/react-router'
-import {
-  Zap,
-  Server,
-  Route as RouteIcon,
-  Shield,
-  Waves,
-  Sparkles,
-} from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ConvexHttpClient } from 'convex/browser'
+import { useMutation, useQuery } from 'convex/react'
 
-export const Route = createFileRoute('/')({ component: App })
+import { api as convexApi } from '../../convex/_generated/api'
+import type { Doc, Id } from '../../convex/_generated/dataModel'
+import { env } from '@/env'
+import DecisionBoardHeader from '@/components/DecisionBoardHeader'
+import DecisionCard from '@/components/DecisionCard'
+import DecisionCreateModal from '@/components/DecisionCreateModal'
 
-function App() {
-  const features = [
-    {
-      icon: <Zap className="w-12 h-12 text-cyan-400" />,
-      title: 'Powerful Server Functions',
-      description:
-        'Write server-side code that seamlessly integrates with your client components. Type-safe, secure, and simple.',
-    },
-    {
-      icon: <Server className="w-12 h-12 text-cyan-400" />,
-      title: 'Flexible Server Side Rendering',
-      description:
-        'Full-document SSR, streaming, and progressive enhancement out of the box. Control exactly what renders where.',
-    },
-    {
-      icon: <RouteIcon className="w-12 h-12 text-cyan-400" />,
-      title: 'API Routes',
-      description:
-        'Build type-safe API endpoints alongside your application. No separate backend needed.',
-    },
-    {
-      icon: <Shield className="w-12 h-12 text-cyan-400" />,
-      title: 'Strongly Typed Everything',
-      description:
-        'End-to-end type safety from server to client. Catch errors before they reach production.',
-    },
-    {
-      icon: <Waves className="w-12 h-12 text-cyan-400" />,
-      title: 'Full Streaming Support',
-      description:
-        'Stream data from server to client progressively. Perfect for AI applications and real-time updates.',
-    },
-    {
-      icon: <Sparkles className="w-12 h-12 text-cyan-400" />,
-      title: 'Next Generation Ready',
-      description:
-        'Built from the ground up for modern web applications. Deploy anywhere JavaScript runs.',
-    },
-  ]
+const fetchDecisions = async () => {
+  const convexUrl = env.VITE_CONVEX_URL
+  if (!convexUrl) {
+    return [] as Array<DecisionWithOptions>
+  }
+  const convex = new ConvexHttpClient(convexUrl)
+  return await convex.query(convexApi.decisions.list, {})
+}
+
+export const Route = createFileRoute('/')({
+  loader: fetchDecisions,
+  component: DecisionBoard,
+})
+
+type DecisionWithOptions = Doc<'decisions'> & {
+  options: Array<Doc<'options'>>
+  selectedOptionId?: Id<'options'> | null
+}
+
+type DecisionDraft = {
+  title: string
+  options: Array<string>
+}
+
+const initialDraft: DecisionDraft = {
+  title: '',
+  options: [''],
+}
+
+const voterStorageKey = 'decision-board-voter-id'
+
+const getOrCreateVoterId = () => {
+  if (typeof window === 'undefined') {
+    return 'server'
+  }
+  const existing = window.localStorage.getItem(voterStorageKey)
+  if (existing) {
+    return existing
+  }
+  const generated = crypto.randomUUID()
+  window.localStorage.setItem(voterStorageKey, generated)
+  return generated
+}
+
+function DecisionBoard() {
+  const [voterId] = useState(() => getOrCreateVoterId())
+
+  const initialDecisions = Route.useLoaderData()
+  const liveDecisions = useQuery(convexApi.decisions.list, { voterId }) as
+    | Array<DecisionWithOptions>
+    | undefined
+  const decisions = liveDecisions ?? initialDecisions
+
+  const addDecision = useMutation(convexApi.decisions.add)
+  const removeDecision = useMutation(convexApi.decisions.remove)
+  const updateDecision = useMutation(convexApi.decisions.update)
+  const addOption = useMutation(convexApi.decisions.addOption)
+  const removeOption = useMutation(convexApi.decisions.removeOption)
+  const voteOption = useMutation(convexApi.decisions.voteOption)
+  const clearVote = useMutation(convexApi.decisions.clearVote)
+
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [draft, setDraft] = useState<DecisionDraft>(initialDraft)
+  const [selected, setSelected] = useState<Record<string, Id<'options'>>>({})
+
+  if (Object.keys(selected).length === 0 && decisions.length > 0) {
+    const seeded = decisions.reduce<Record<string, Id<'options'>>>(
+      (acc, decision) => {
+        if (decision.selectedOptionId) {
+          acc[decision._id] = decision.selectedOptionId
+        }
+        return acc
+      },
+      {},
+    )
+
+    if (Object.keys(seeded).length > 0) {
+      setSelected(seeded)
+    }
+  }
+
+  const sanitizedDraftOptions = useMemo(
+    () =>
+      draft.options
+        .map((option) => option.trim())
+        .filter((option) => option.length > 0),
+    [draft.options],
+  )
+
+  const canSubmit =
+    draft.title.trim().length > 0 && sanitizedDraftOptions.length >= 1
+
+  const handleCreateDecision = async () => {
+    if (!canSubmit) return
+    const title = draft.title.trim()
+
+    await addDecision({
+      title,
+      description: '',
+      kind: 'multiple',
+      options: sanitizedDraftOptions,
+    })
+
+    setDraft(initialDraft)
+    setIsModalOpen(false)
+  }
+
+  const handleCloseModal = () => {
+    setDraft(initialDraft)
+    setIsModalOpen(false)
+  }
+
+  const handleVote = async (decisionId: string, optionId: Id<'options'>) => {
+    const previousVote = selected[decisionId]
+
+    if (previousVote === optionId) {
+      await clearVote({ decisionId: decisionId as Id<'decisions'>, voterId })
+      setSelected((prev) => {
+        const next = { ...prev }
+        delete next[decisionId]
+        return next
+      })
+      return
+    }
+
+    if (previousVote) {
+      await clearVote({ decisionId: decisionId as Id<'decisions'>, voterId })
+    }
+
+    setSelected((prev) => ({ ...prev, [decisionId]: optionId }))
+    await voteOption({ optionId, voterId })
+  }
+
+  const handleRemoveDecision = async (decisionId: Id<'decisions'>) => {
+    await removeDecision({ id: decisionId })
+  }
+
+  const handleUpdateDecision = async (
+    decision: DecisionWithOptions,
+    payload: { title: string; options: Array<string> },
+  ) => {
+    await updateDecision({
+      id: decision._id,
+      title: payload.title,
+      description: decision.description,
+      kind: decision.kind,
+    })
+
+    const existingOptions = decision.options
+    const trimmedOptions = payload.options
+      .map((option) => option.trim())
+      .filter((option) => option.length > 0)
+
+    const removeTargets = existingOptions.filter(
+      (option) => !trimmedOptions.includes(option.text),
+    )
+
+    await Promise.all(
+      removeTargets.map((option) => removeOption({ id: option._id })),
+    )
+
+    const existingTexts = new Set(existingOptions.map((option) => option.text))
+    const nextOptions = trimmedOptions.filter(
+      (option) => !existingTexts.has(option),
+    )
+
+    await Promise.all(
+      nextOptions.map((text, index) =>
+        addOption({
+          decisionId: decision._id,
+          text,
+          position: existingOptions.length + index,
+        }),
+      ),
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
-      <section className="relative py-20 px-6 text-center overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-purple-500/10"></div>
-        <div className="relative max-w-5xl mx-auto">
-          <div className="flex items-center justify-center gap-6 mb-6">
-            <img
-              src="/tanstack-circle-logo.png"
-              alt="TanStack Logo"
-              className="w-24 h-24 md:w-32 md:h-32"
-            />
-            <h1 className="text-6xl md:text-7xl font-black text-white [letter-spacing:-0.08em]">
-              <span className="text-gray-300">TANSTACK</span>{' '}
-              <span className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                START
-              </span>
-            </h1>
+    <div className="min-h-screen bg-white">
+      <DecisionBoardHeader onCreate={() => setIsModalOpen(true)} />
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-20 pt-10">
+        {decisions.length === 0 ? (
+          <div className="rounded-4xl border border-white/70 bg-white/80 p-10 text-center text-sm text-slate-500 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+            No decisions yet. Start by creating one.
           </div>
-          <p className="text-2xl md:text-3xl text-gray-300 mb-4 font-light">
-            The framework for next generation AI applications
-          </p>
-          <p className="text-lg text-gray-400 max-w-3xl mx-auto mb-8">
-            Full-stack framework powered by TanStack Router for React and Solid.
-            Build modern applications with server functions, streaming, and type
-            safety.
-          </p>
-          <div className="flex flex-col items-center gap-4">
-            <a
-              href="https://tanstack.com/start"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-8 py-3 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold rounded-lg transition-colors shadow-lg shadow-cyan-500/50"
-            >
-              Documentation
-            </a>
-            <p className="text-gray-400 text-sm mt-2">
-              Begin your TanStack Start journey by editing{' '}
-              <code className="px-2 py-1 bg-slate-700 rounded text-cyan-400">
-                /src/routes/index.tsx
-              </code>
-            </p>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2">
+            {decisions.map((decision) => (
+              <DecisionCard
+                key={decision._id}
+                decision={decision}
+                selectedOptionId={selected[decision._id]}
+                onVote={(optionId: Id<'options'>) =>
+                  handleVote(decision._id, optionId)
+                }
+                onDelete={() => handleRemoveDecision(decision._id)}
+                onSave={(payload: { title: string; options: Array<string> }) =>
+                  handleUpdateDecision(decision, payload)
+                }
+              />
+            ))}
           </div>
-        </div>
-      </section>
+        )}
+      </main>
 
-      <section className="py-16 px-6 max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {features.map((feature, index) => (
-            <div
-              key={index}
-              className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 hover:border-cyan-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/10"
-            >
-              <div className="mb-4">{feature.icon}</div>
-              <h3 className="text-xl font-semibold text-white mb-3">
-                {feature.title}
-              </h3>
-              <p className="text-gray-400 leading-relaxed">
-                {feature.description}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <DecisionCreateModal
+        isOpen={isModalOpen}
+        draft={draft}
+        onDraftChange={setDraft}
+        onAddOption={() =>
+          setDraft((prev) => ({
+            ...prev,
+            options: [...prev.options, ''],
+          }))
+        }
+        onClose={handleCloseModal}
+        onCreate={handleCreateDecision}
+        canSubmit={canSubmit}
+      />
     </div>
   )
 }
