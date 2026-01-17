@@ -1,43 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
-import { ConvexHttpClient } from 'convex/browser'
-import { useMutation, useQuery } from 'convex/react'
+import { convexQuery, useConvexMutation } from '@convex-dev/react-query'
+import { useSuspenseQuery } from '@tanstack/react-query'
 
-import { api as convexApi } from '../../convex/_generated/api'
+import { api } from '../../convex/_generated/api'
 import type { Doc, Id } from '../../convex/_generated/dataModel'
-import { env } from '@/env'
 import DecisionBoardHeader from '@/components/DecisionBoardHeader'
 import DecisionCard from '@/components/DecisionCard'
 import DecisionCreateModal from '@/components/DecisionCreateModal'
-
-const fetchDecisions = async () => {
-  const convexUrl = env.VITE_CONVEX_URL
-  if (!convexUrl) {
-    return [] as Array<DecisionWithOptions>
-  }
-  const convex = new ConvexHttpClient(convexUrl)
-  return await convex.query(convexApi.decisions.list, {})
-}
-
-export const Route = createFileRoute('/')({
-  loader: fetchDecisions,
-  component: DecisionBoard,
-})
-
-type DecisionWithOptions = Doc<'decisions'> & {
-  options: Array<Doc<'options'>>
-  selectedOptionId?: Id<'options'> | null
-}
-
-type DecisionDraft = {
-  title: string
-  options: Array<string>
-}
-
-const initialDraft: DecisionDraft = {
-  title: '',
-  options: [''],
-}
 
 const voterStorageKey = 'decision-board-voter-id'
 
@@ -54,22 +24,45 @@ const getOrCreateVoterId = () => {
   return generated
 }
 
+export const Route = createFileRoute('/')({
+  loader: async ({ context }) => {
+    await context.queryClient.prefetchQuery(convexQuery(api.decisions.list, {}))
+  },
+  component: DecisionBoard,
+})
+
+type OptionWithVotes = Doc<'options'> & {
+  votes: number
+}
+
+type DecisionWithOptions = Doc<'decisions'> & {
+  options: Array<OptionWithVotes>
+  selectedOptionId?: Id<'options'> | null
+}
+
+type DecisionDraft = {
+  title: string
+  options: Array<string>
+}
+
+const initialDraft: DecisionDraft = {
+  title: '',
+  options: [''],
+}
+
 function DecisionBoard() {
-  const [voterId] = useState(() => getOrCreateVoterId())
+  const voterId = useMemo(() => getOrCreateVoterId(), [])
 
-  const initialDecisions = Route.useLoaderData()
-  const liveDecisions = useQuery(convexApi.decisions.list, { voterId }) as
-    | Array<DecisionWithOptions>
-    | undefined
-  const decisions = liveDecisions ?? initialDecisions
-
-  const addDecision = useMutation(convexApi.decisions.add)
-  const removeDecision = useMutation(convexApi.decisions.remove)
-  const updateDecision = useMutation(convexApi.decisions.update)
-  const addOption = useMutation(convexApi.decisions.addOption)
-  const removeOption = useMutation(convexApi.decisions.removeOption)
-  const voteOption = useMutation(convexApi.decisions.voteOption)
-  const clearVote = useMutation(convexApi.decisions.clearVote)
+  const { data: decisions } = useSuspenseQuery(
+    convexQuery(api.decisions.list, { voterId }),
+  )
+  const addDecision = useConvexMutation(api.decisions.add)
+  const removeDecision = useConvexMutation(api.decisions.remove)
+  const updateDecision = useConvexMutation(api.decisions.update)
+  const addOption = useConvexMutation(api.decisions.addOption)
+  const removeOption = useConvexMutation(api.decisions.removeOption)
+  const voteOption = useConvexMutation(api.decisions.voteOption)
+  const clearVote = useConvexMutation(api.decisions.clearVote)
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [draft, setDraft] = useState<DecisionDraft>(initialDraft)
@@ -108,8 +101,6 @@ function DecisionBoard() {
 
     await addDecision({
       title,
-      description: '',
-      kind: 'multiple',
       options: sanitizedDraftOptions,
     })
 
@@ -154,8 +145,6 @@ function DecisionBoard() {
     await updateDecision({
       id: decision._id,
       title: payload.title,
-      description: decision.description,
-      kind: decision.kind,
     })
 
     const existingOptions = decision.options

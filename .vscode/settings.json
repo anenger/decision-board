@@ -1,11 +1,20 @@
 {
   "files.watcherExclude": {
-    "**/routeTree.gen.ts": true
+    "**/routeTree.gen.ts": true,
+    "convex/_generated/**": true,
+    ".output/**": true,
+    "dist/**": true
   },
   "search.exclude": {
-    "**/routeTree.gen.ts": true
+    "**/routeTree.gen.ts": true,
+    "convex/_generated/**": true,
+    ".output/**": true,
+    "dist/**": true
   },
   "files.readonlyInclude": {
-    "**/routeTree.gen.ts": true
+    "**/routeTree.gen.ts": true,
+    "convex/_generated/**": true,
+    ".output/**": true,
+    "dist/**": true
   }
 }

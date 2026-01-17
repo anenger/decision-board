@@ -1,4 +1,7 @@
 import { tanstackConfig } from '@tanstack/eslint-config'
 import { globalIgnores } from 'eslint/config'
 
-export default [globalIgnores(['convex/_generated/**']), ...tanstackConfig]
+export default [
+  globalIgnores(['convex/_generated/**', '.output', 'dist', 'node_modules']),
+  ...tanstackConfig,
+]

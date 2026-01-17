@@ -32,7 +32,7 @@ export default function DecisionCreateModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70 px-4 py-10 backdrop-blur">
-      <div className="relative w-full max-w-lg rounded-[32px] border border-white/80 bg-white p-8 shadow-[0_30px_80px_rgba(15,23,42,0.18)]">
+      <div className="relative w-full max-w-lg rounded-4xl border border-white/80 bg-white p-8 shadow-[0_30px_80px_rgba(15,23,42,0.18)]">
         <button
           type="button"
           onClick={onClose}

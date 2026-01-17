@@ -3,8 +3,12 @@ import { Check, Pencil, Plus, Trash2, X } from 'lucide-react'
 
 import type { Doc, Id } from '../../convex/_generated/dataModel'
 
+type OptionWithVotes = Doc<'options'> & {
+  votes: number
+}
+
 type DecisionWithOptions = Doc<'decisions'> & {
-  options: Array<Doc<'options'>>
+  options: Array<OptionWithVotes>
 }
 
 type DecisionCardProps = {
