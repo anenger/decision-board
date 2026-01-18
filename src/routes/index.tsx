@@ -1,32 +1,28 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
-import { convexQuery, useConvexMutation } from '@convex-dev/react-query'
+import { useCallback, useMemo, useState } from 'react'
 import { useSuspenseQuery } from '@tanstack/react-query'
-
-import { api } from '../../convex/_generated/api'
 import type { Doc, Id } from '../../convex/_generated/dataModel'
 import DecisionBoardHeader from '@/components/DecisionBoardHeader'
 import DecisionCard from '@/components/DecisionCard'
 import DecisionCreateModal from '@/components/DecisionCreateModal'
-
-const voterStorageKey = 'decision-board-voter-id'
-
-const getOrCreateVoterId = () => {
-  if (typeof window === 'undefined') {
-    return 'server'
-  }
-  const existing = window.localStorage.getItem(voterStorageKey)
-  if (existing) {
-    return existing
-  }
-  const generated = crypto.randomUUID()
-  window.localStorage.setItem(voterStorageKey, generated)
-  return generated
-}
+import { login } from '@/lib/session'
+import { Loader } from '@/components/Loader'
+import {
+  decisionQueries,
+  useAddOptionMutation,
+  useCreateDecisionMutation,
+  useDeleteDecisionMutation,
+  useRemoveOptionMutation,
+  useUpdateDecisionMutation,
+  useVoteMutation,
+} from '@/data/queries'
 
 export const Route = createFileRoute('/')({
-  loader: async ({ context }) => {
-    await context.queryClient.prefetchQuery(convexQuery(api.decisions.list, {}))
+  pendingComponent: () => <Loader />,
+  loader: async ({ context: { queryClient } }) => {
+    const voterId = await login()
+    queryClient.ensureQueryData(decisionQueries.list(voterId))
+    return { voterId }
   },
   component: DecisionBoard,
 })
@@ -37,7 +33,6 @@ type OptionWithVotes = Doc<'options'> & {
 
 type DecisionWithOptions = Doc<'decisions'> & {
   options: Array<OptionWithVotes>
-  selectedOptionId?: Id<'options'> | null
 }
 
 type DecisionDraft = {
@@ -51,38 +46,17 @@ const initialDraft: DecisionDraft = {
 }
 
 function DecisionBoard() {
-  const voterId = useMemo(() => getOrCreateVoterId(), [])
-
-  const { data: decisions } = useSuspenseQuery(
-    convexQuery(api.decisions.list, { voterId }),
-  )
-  const addDecision = useConvexMutation(api.decisions.add)
-  const removeDecision = useConvexMutation(api.decisions.remove)
-  const updateDecision = useConvexMutation(api.decisions.update)
-  const addOption = useConvexMutation(api.decisions.addOption)
-  const removeOption = useConvexMutation(api.decisions.removeOption)
-  const voteOption = useConvexMutation(api.decisions.voteOption)
-  const clearVote = useConvexMutation(api.decisions.clearVote)
+  const { voterId } = Route.useLoaderData()
+  const { data: decisions } = useSuspenseQuery(decisionQueries.list(voterId))
+  const { mutate: addDecision } = useCreateDecisionMutation()
+  const { mutate: removeDecision } = useDeleteDecisionMutation()
+  const { mutate: updateDecision } = useUpdateDecisionMutation()
+  const { mutate: addOption } = useAddOptionMutation()
+  const { mutate: removeOption } = useRemoveOptionMutation()
+  const { mutate: vote } = useVoteMutation()
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [draft, setDraft] = useState<DecisionDraft>(initialDraft)
-  const [selected, setSelected] = useState<Record<string, Id<'options'>>>({})
-
-  if (Object.keys(selected).length === 0 && decisions.length > 0) {
-    const seeded = decisions.reduce<Record<string, Id<'options'>>>(
-      (acc, decision) => {
-        if (decision.selectedOptionId) {
-          acc[decision._id] = decision.selectedOptionId
-        }
-        return acc
-      },
-      {},
-    )
-
-    if (Object.keys(seeded).length > 0) {
-      setSelected(seeded)
-    }
-  }
 
   const sanitizedDraftOptions = useMemo(
     () =>
@@ -95,11 +69,11 @@ function DecisionBoard() {
   const canSubmit =
     draft.title.trim().length > 0 && sanitizedDraftOptions.length >= 1
 
-  const handleCreateDecision = async () => {
+  const handleCreateDecision = () => {
     if (!canSubmit) return
     const title = draft.title.trim()
 
-    await addDecision({
+    addDecision({
       title,
       options: sanitizedDraftOptions,
     })
@@ -113,36 +87,18 @@ function DecisionBoard() {
     setIsModalOpen(false)
   }
 
-  const handleVote = async (decisionId: string, optionId: Id<'options'>) => {
-    const previousVote = selected[decisionId]
+  const handleRemoveDecision = useCallback(
+    (decisionId: Id<'decisions'>) => {
+      removeDecision({ id: decisionId })
+    },
+    [removeDecision],
+  )
 
-    if (previousVote === optionId) {
-      await clearVote({ decisionId: decisionId as Id<'decisions'>, voterId })
-      setSelected((prev) => {
-        const next = { ...prev }
-        delete next[decisionId]
-        return next
-      })
-      return
-    }
-
-    if (previousVote) {
-      await clearVote({ decisionId: decisionId as Id<'decisions'>, voterId })
-    }
-
-    setSelected((prev) => ({ ...prev, [decisionId]: optionId }))
-    await voteOption({ optionId, voterId })
-  }
-
-  const handleRemoveDecision = async (decisionId: Id<'decisions'>) => {
-    await removeDecision({ id: decisionId })
-  }
-
-  const handleUpdateDecision = async (
+  const handleUpdateDecision = (
     decision: DecisionWithOptions,
     payload: { title: string; options: Array<string> },
   ) => {
-    await updateDecision({
+    updateDecision({
       id: decision._id,
       title: payload.title,
     })
@@ -156,16 +112,14 @@ function DecisionBoard() {
       (option) => !trimmedOptions.includes(option.text),
     )
 
-    await Promise.all(
-      removeTargets.map((option) => removeOption({ id: option._id })),
-    )
+    Promise.all(removeTargets.map((option) => removeOption({ id: option._id })))
 
     const existingTexts = new Set(existingOptions.map((option) => option.text))
     const nextOptions = trimmedOptions.filter(
       (option) => !existingTexts.has(option),
     )
 
-    await Promise.all(
+    Promise.all(
       nextOptions.map((text, index) =>
         addOption({
           decisionId: decision._id,
@@ -190,10 +144,13 @@ function DecisionBoard() {
               <DecisionCard
                 key={decision._id}
                 decision={decision}
-                selectedOptionId={selected[decision._id]}
-                onVote={(optionId: Id<'options'>) =>
-                  handleVote(decision._id, optionId)
-                }
+                onVote={(optionId: Id<'options'>) => {
+                  vote({
+                    optionId,
+                    voterId,
+                    decisionId: decision._id,
+                  })
+                }}
                 onDelete={() => handleRemoveDecision(decision._id)}
                 onSave={(payload: { title: string; options: Array<string> }) =>
                   handleUpdateDecision(decision, payload)

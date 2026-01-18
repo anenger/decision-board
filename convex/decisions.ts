@@ -1,82 +1,50 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import type { Doc, Id } from './_generated/dataModel'
 
 export const list = query({
   args: { voterId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const decisions = await ctx.db
-      .query('decisions')
-      .withIndex('by_creation_time')
-      .order('desc')
-      .collect()
+    const { voterId } = args
 
-    const optionsByDecision = await Promise.all(
-      decisions.map((decision) =>
-        ctx.db
-          .query('options')
-          .withIndex('by_decision_position', (q) =>
-            q.eq('decisionId', decision._id),
-          )
-          .collect(),
-      ),
-    )
+    const decisions = await ctx.db.query('decisions').order('asc').collect()
+    const options = await ctx.db.query('options').order('asc').collect()
+    const votes = await ctx.db.query('votes').collect()
 
-    const allOptions = optionsByDecision.flat()
-    const voteCounts = await Promise.all(
-      allOptions.map((option) =>
-        ctx.db
-          .query('votes')
-          .withIndex('by_option', (q) => q.eq('optionId', option._id))
-          .collect(),
-      ),
-    )
+    const optionsByDecisionId = decisions.reduce((map, decision) => {
+      map.set(
+        decision._id,
+        options.filter((option) => option.decisionId === decision._id),
+      )
+      return map
+    }, new Map<Id<'decisions'>, Array<Doc<'options'>>>())
 
-    const optionVoteCounts = new Map(
-      allOptions.map((option, index) => [
-        option._id,
-        voteCounts[index]?.length ?? 0,
-      ]),
-    )
+    const voteCountsByOption = options.reduce((map, option) => {
+      const count = votes.filter((vote) => vote.optionId === option._id).length
+      map.set(option._id, count)
+      return map
+    }, new Map<Id<'options'>, number>())
 
-    const votes = args.voterId
-      ? await ctx.db
-          .query('votes')
-          .withIndex('by_voter', (q) => q.eq('voterId', args.voterId ?? ''))
-          .collect()
-      : []
-
-    const optionDecisionMap = new Map(
-      allOptions.map((option) => [option._id, option.decisionId]),
-    )
-
-    const voteByDecision = new Map(
-      votes
-        .map((vote) => {
-          const decisionId = optionDecisionMap.get(vote.optionId)
-          return decisionId ? [decisionId, vote.optionId] : null
-        })
-        .filter(
-          (
-            entry,
-          ): entry is [
-            (typeof decisions)[number]['_id'],
-            (typeof votes)[number]['optionId'],
-          ] => entry !== null,
-        ),
-    )
-
-    return decisions.map((decision, index) => ({
-      ...decision,
-      options: (optionsByDecision[index] ?? []).map((option) => ({
-        ...option,
-        votes: optionVoteCounts.get(option._id) ?? 0,
-      })),
-      selectedOptionId: voteByDecision.get(decision._id) ?? null,
-    }))
+    return decisions.map((decision) => {
+      const decisionOptions = optionsByDecisionId.get(decision._id) ?? []
+      return {
+        ...decision,
+        options: decisionOptions.map((option) => ({
+          ...option,
+          isSelected: voterId
+            ? votes.some(
+                (vote) =>
+                  vote.optionId === option._id && vote.voterId === voterId,
+              )
+            : false,
+          votes: voteCountsByOption.get(option._id) ?? 0,
+        })),
+      }
+    })
   },
 })
 
-export const add = mutation({
+export const addDecision = mutation({
   args: {
     title: v.string(),
     options: v.array(v.string()),
@@ -100,7 +68,7 @@ export const add = mutation({
   },
 })
 
-export const remove = mutation({
+export const removeDecision = mutation({
   args: { id: v.id('decisions') },
   handler: async (ctx, args) => {
     const options = await ctx.db
@@ -108,8 +76,26 @@ export const remove = mutation({
       .withIndex('by_decision', (q) => q.eq('decisionId', args.id))
       .collect()
 
+    const votes = await ctx.db
+      .query('votes')
+      .withIndex('by_decision', (q) => q.eq('decisionId', args.id))
+      .collect()
+
     await Promise.all(options.map((option) => ctx.db.delete(option._id)))
+    await Promise.all(votes.map((vote) => ctx.db.delete(vote._id)))
     return await ctx.db.delete(args.id)
+  },
+})
+
+export const updateDecision = mutation({
+  args: {
+    id: v.id('decisions'),
+    title: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      title: args.title,
+    })
   },
 })
 
@@ -135,84 +121,35 @@ export const removeOption = mutation({
   },
 })
 
-export const voteOption = mutation({
-  args: { optionId: v.id('options'), voterId: v.string() },
+export const vote = mutation({
+  args: {
+    decisionId: v.id('decisions'),
+    optionId: v.id('options'),
+    voterId: v.string(),
+  },
   handler: async (ctx, args) => {
-    const option = await ctx.db.get(args.optionId)
-    if (!option) {
-      throw new Error('Option not found')
-    }
-
-    const decisionOptions = await ctx.db
-      .query('options')
-      .withIndex('by_decision', (q) => q.eq('decisionId', option.decisionId))
-      .collect()
-
-    const decisionOptionIds = new Set(
-      decisionOptions.map((decisionOption) => decisionOption._id),
-    )
-
-    const voterVotes = await ctx.db
+    const existingVote = await ctx.db
       .query('votes')
-      .withIndex('by_voter', (q) => q.eq('voterId', args.voterId))
-      .collect()
-
-    const existingVote = voterVotes.find((vote) =>
-      decisionOptionIds.has(vote.optionId),
-    )
-
-    if (existingVote?.optionId === args.optionId) {
-      return
-    }
+      .withIndex('by_decision_voter', (q) =>
+        q.eq('decisionId', args.decisionId).eq('voterId', args.voterId),
+      )
+      .first()
 
     if (existingVote) {
+      // If a vote already exists for this voter and decision, remove it
       await ctx.db.delete(existingVote._id)
     }
 
-    await ctx.db.insert('votes', {
-      optionId: args.optionId,
-      voterId: args.voterId,
-    })
-  },
-})
-
-export const clearVote = mutation({
-  args: { decisionId: v.id('decisions'), voterId: v.string() },
-  handler: async (ctx, args) => {
-    const decisionOptions = await ctx.db
-      .query('options')
-      .withIndex('by_decision', (q) => q.eq('decisionId', args.decisionId))
-      .collect()
-
-    const decisionOptionIds = new Set(
-      decisionOptions.map((option) => option._id),
-    )
-
-    const voterVotes = await ctx.db
-      .query('votes')
-      .withIndex('by_voter', (q) => q.eq('voterId', args.voterId))
-      .collect()
-
-    const existingVote = voterVotes.find((vote) =>
-      decisionOptionIds.has(vote.optionId),
-    )
-
-    if (!existingVote) {
+    // If the existing vote is for the same option, we are done
+    if (existingVote && existingVote.optionId === args.optionId) {
       return
     }
 
-    await ctx.db.delete(existingVote._id)
-  },
-})
-
-export const update = mutation({
-  args: {
-    id: v.id('decisions'),
-    title: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.id, {
-      title: args.title,
+    // Insert the new vote
+    await ctx.db.insert('votes', {
+      optionId: args.optionId,
+      decisionId: args.decisionId,
+      voterId: args.voterId,
     })
   },
 })

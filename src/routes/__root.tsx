@@ -1,20 +1,20 @@
 import {
   HeadContent,
+  Outlet,
   Scripts,
   createRootRouteWithContext,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 
-import ConvexProvider from '../integrations/convex/provider'
 import appCss from '../styles.css?url'
 import type { QueryClient } from '@tanstack/react-query'
+import { NotFound } from '@/components/NotFound'
+import { DefaultCatchBoundary } from '@/components/DefaultCatchBoundary'
 
-interface RouterContext {
+export const Route = createRootRouteWithContext<{
   queryClient: QueryClient
-}
-
-export const Route = createRootRouteWithContext<RouterContext>()({
+}>()({
   head: () => ({
     meta: [
       {
@@ -35,9 +35,24 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       },
     ],
   }),
-
-  shellComponent: RootDocument,
+  shellComponent: RootComponent,
+  errorComponent: (props) => {
+    return (
+      <RootDocument>
+        <DefaultCatchBoundary {...props} />
+      </RootDocument>
+    )
+  },
+  notFoundComponent: () => <NotFound />,
 })
+
+function RootComponent() {
+  return (
+    <RootDocument>
+      <Outlet />
+    </RootDocument>
+  )
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
@@ -56,20 +71,18 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         />
       </head>
       <body>
-        <ConvexProvider>
-          {children}
-          <TanStackDevtools
-            config={{
-              position: 'bottom-right',
-            }}
-            plugins={[
-              {
-                name: 'Tanstack Router',
-                render: <TanStackRouterDevtoolsPanel />,
-              },
-            ]}
-          />
-        </ConvexProvider>
+        {children}
+        <TanStackDevtools
+          config={{
+            position: 'bottom-right',
+          }}
+          plugins={[
+            {
+              name: 'Tanstack Router',
+              render: <TanStackRouterDevtoolsPanel />,
+            },
+          ]}
+        />
         <Scripts />
       </body>
     </html>
