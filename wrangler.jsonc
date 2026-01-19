@@ -5,9 +5,5 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	"main": "@tanstack/react-start/server-entry",
-	"vars": {
-		"CONVEX_DEPLOYMENT": "dev:unique-pig-692",
-		"VITE_CONVEX_URL": "https://unique-pig-692.convex.cloud"
-	}
+	"main": "@tanstack/react-start/server-entry"
 }
