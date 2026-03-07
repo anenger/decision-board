@@ -2,28 +2,68 @@ import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import type { Doc, Id } from './_generated/dataModel'
 
-export const list = query({
-  args: { voterId: v.optional(v.string()) },
+export const listByBoard = query({
+  args: {
+    boardId: v.id('boards'),
+    voterId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    const { voterId } = args
+    const { boardId, voterId } = args
 
-    const decisions = await ctx.db.query('decisions').order('asc').collect()
-    const options = await ctx.db.query('options').order('asc').collect()
-    const votes = await ctx.db.query('votes').collect()
+    const decisions = await ctx.db
+      .query('decisions')
+      .withIndex('by_board', (q) => q.eq('boardId', boardId))
+      .order('asc')
+      .collect()
 
-    const optionsByDecisionId = decisions.reduce((map, decision) => {
-      map.set(
-        decision._id,
-        options.filter((option) => option.decisionId === decision._id),
-      )
-      return map
-    }, new Map<Id<'decisions'>, Array<Doc<'options'>>>())
+    const optionsByDecisionId = new Map<
+      Id<'decisions'>,
+      Array<Doc<'options'>>
+    >()
+    const voteCountsByOption = new Map<Id<'options'>, number>()
+    const selectedOptionIds = new Set<Id<'options'>>()
 
-    const voteCountsByOption = options.reduce((map, option) => {
-      const count = votes.filter((vote) => vote.optionId === option._id).length
-      map.set(option._id, count)
-      return map
-    }, new Map<Id<'options'>, number>())
+    await Promise.all(
+      decisions.map(async (decision) => {
+        const [options, votes] = await Promise.all([
+          ctx.db
+            .query('options')
+            .withIndex('by_decision_position', (q) =>
+              q.eq('decisionId', decision._id),
+            )
+            .collect(),
+          ctx.db
+            .query('votes')
+            .withIndex('by_decision', (q) => q.eq('decisionId', decision._id))
+            .collect(),
+        ])
+
+        optionsByDecisionId.set(decision._id, options)
+
+        const decisionVoteCounts = new Map<Id<'options'>, number>()
+        for (const vote of votes) {
+          decisionVoteCounts.set(
+            vote.optionId,
+            (decisionVoteCounts.get(vote.optionId) ?? 0) + 1,
+          )
+        }
+
+        for (const option of options) {
+          voteCountsByOption.set(
+            option._id,
+            decisionVoteCounts.get(option._id) ?? 0,
+          )
+        }
+
+        if (voterId) {
+          for (const vote of votes) {
+            if (vote.voterId === voterId) {
+              selectedOptionIds.add(vote.optionId)
+            }
+          }
+        }
+      }),
+    )
 
     return decisions.map((decision) => {
       const decisionOptions = optionsByDecisionId.get(decision._id) ?? []
@@ -31,12 +71,7 @@ export const list = query({
         ...decision,
         options: decisionOptions.map((option) => ({
           ...option,
-          isSelected: voterId
-            ? votes.some(
-                (vote) =>
-                  vote.optionId === option._id && vote.voterId === voterId,
-              )
-            : false,
+          isSelected: selectedOptionIds.has(option._id),
           votes: voteCountsByOption.get(option._id) ?? 0,
         })),
       }
@@ -46,11 +81,18 @@ export const list = query({
 
 export const addDecision = mutation({
   args: {
+    boardId: v.id('boards'),
     title: v.string(),
     options: v.array(v.string()),
   },
   handler: async (ctx, args) => {
+    const board = await ctx.db.get(args.boardId)
+    if (!board) {
+      throw new Error('Board not found')
+    }
+
     const decisionId = await ctx.db.insert('decisions', {
+      boardId: args.boardId,
       title: args.title,
     })
 
@@ -123,11 +165,17 @@ export const removeOption = mutation({
 
 export const vote = mutation({
   args: {
+    boardId: v.id('boards'),
     decisionId: v.id('decisions'),
     optionId: v.id('options'),
     voterId: v.string(),
   },
   handler: async (ctx, args) => {
+    const decision = await ctx.db.get(args.decisionId)
+    if (!decision || decision.boardId !== args.boardId) {
+      throw new Error('Decision not found for this board')
+    }
+
     const existingVote = await ctx.db
       .query('votes')
       .withIndex('by_decision_voter', (q) =>

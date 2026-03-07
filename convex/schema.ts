@@ -2,9 +2,14 @@ import { defineSchema, defineTable } from 'convex/server'
 import { v } from 'convex/values'
 
 export default defineSchema({
+  boards: defineTable({
+    name: v.string(),
+    ownerVoterId: v.string(),
+  }).index('by_owner', ['ownerVoterId']),
   decisions: defineTable({
+    boardId: v.id('boards'),
     title: v.string(),
-  }),
+  }).index('by_board', ['boardId']),
   options: defineTable({
     decisionId: v.id('decisions'),
     text: v.string(),

@@ -6,10 +6,17 @@
 
 body {
   @apply m-0;
-  font-family: 'Sora', 'Segoe UI', sans-serif;
+  font-family: 'DM Sans', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #ffffff;
+  background-color: #f7f8fa;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: 'DM Sans', system-ui, sans-serif;
 }
 
 code {
@@ -18,74 +25,74 @@ code {
 }
 
 :root {
-  --background: oklch(0.995 0.002 270);
-  --foreground: oklch(0.22 0.01 270);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.01 270);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.01 270);
-  --primary: oklch(0.2 0.01 270);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.96 0.01 270);
-  --secondary-foreground: oklch(0.3 0.01 270);
-  --muted: oklch(0.96 0.01 270);
-  --muted-foreground: oklch(0.55 0.01 270);
-  --accent: oklch(0.93 0.01 270);
-  --accent-foreground: oklch(0.22 0.01 270);
-  --destructive: oklch(0.58 0.2 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.92 0.01 270);
-  --input: oklch(0.92 0.01 270);
-  --ring: oklch(0.65 0.02 270);
+  --background: #f7f8fa;
+  --foreground: #1a1a2e;
+  --card: #ffffff;
+  --card-foreground: #1a1a2e;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a2e;
+  --primary: #4f6df5;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f1f4;
+  --secondary-foreground: #3a3a4a;
+  --muted: #f0f1f4;
+  --muted-foreground: #6b6f80;
+  --accent: #4f6df5;
+  --accent-foreground: #ffffff;
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --border: #e2e4ea;
+  --input: #e2e4ea;
+  --ring: #4f6df5;
   --chart-1: oklch(0.7 0.12 260);
   --chart-2: oklch(0.72 0.12 200);
   --chart-3: oklch(0.68 0.08 120);
   --chart-4: oklch(0.8 0.1 60);
   --chart-5: oklch(0.75 0.12 320);
-  --radius: 1.25rem;
-  --sidebar: oklch(0.995 0.002 270);
-  --sidebar-foreground: oklch(0.22 0.01 270);
-  --sidebar-primary: oklch(0.2 0.01 270);
-  --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.96 0.01 270);
-  --sidebar-accent-foreground: oklch(0.3 0.01 270);
-  --sidebar-border: oklch(0.92 0.01 270);
-  --sidebar-ring: oklch(0.65 0.02 270);
+  --radius: 0.5rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1a1a2e;
+  --sidebar-primary: #4f6df5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f0f1f4;
+  --sidebar-accent-foreground: #3a3a4a;
+  --sidebar-border: #e2e4ea;
+  --sidebar-ring: #4f6df5;
 }
 
 .dark {
-  --background: oklch(0.12 0.01 270);
-  --foreground: oklch(0.95 0 0);
-  --card: oklch(0.16 0.01 270);
-  --card-foreground: oklch(0.95 0 0);
-  --popover: oklch(0.16 0.01 270);
-  --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.95 0 0);
-  --primary-foreground: oklch(0.2 0.01 270);
-  --secondary: oklch(0.22 0.01 270);
-  --secondary-foreground: oklch(0.95 0 0);
-  --muted: oklch(0.22 0.01 270);
-  --muted-foreground: oklch(0.7 0.01 270);
-  --accent: oklch(0.22 0.01 270);
-  --accent-foreground: oklch(0.95 0 0);
-  --destructive: oklch(0.5 0.2 25);
-  --destructive-foreground: oklch(0.95 0 0);
-  --border: oklch(0.22 0.01 270);
-  --input: oklch(0.22 0.01 270);
-  --ring: oklch(0.65 0.02 270);
+  --background: #111119;
+  --foreground: #ededef;
+  --card: #1a1a24;
+  --card-foreground: #ededef;
+  --popover: #1a1a24;
+  --popover-foreground: #ededef;
+  --primary: #6b8aff;
+  --primary-foreground: #111119;
+  --secondary: #252530;
+  --secondary-foreground: #ededef;
+  --muted: #252530;
+  --muted-foreground: #8b8d9a;
+  --accent: #252530;
+  --accent-foreground: #ededef;
+  --destructive: #e5484d;
+  --destructive-foreground: #ededef;
+  --border: #2a2a38;
+  --input: #2a2a38;
+  --ring: #6b8aff;
   --chart-1: oklch(0.7 0.12 260);
   --chart-2: oklch(0.72 0.12 200);
   --chart-3: oklch(0.68 0.08 120);
   --chart-4: oklch(0.8 0.1 60);
   --chart-5: oklch(0.75 0.12 320);
-  --sidebar: oklch(0.16 0.01 270);
-  --sidebar-foreground: oklch(0.95 0 0);
-  --sidebar-primary: oklch(0.95 0 0);
-  --sidebar-primary-foreground: oklch(0.2 0.01 270);
-  --sidebar-accent: oklch(0.22 0.01 270);
-  --sidebar-accent-foreground: oklch(0.95 0 0);
-  --sidebar-border: oklch(0.22 0.01 270);
-  --sidebar-ring: oklch(0.65 0.02 270);
+  --sidebar: #1a1a24;
+  --sidebar-foreground: #ededef;
+  --sidebar-primary: #6b8aff;
+  --sidebar-primary-foreground: #111119;
+  --sidebar-accent: #252530;
+  --sidebar-accent-foreground: #ededef;
+  --sidebar-border: #2a2a38;
+  --sidebar-ring: #6b8aff;
 }
 
 @theme inline {
@@ -136,49 +143,72 @@ code {
   }
 }
 
-@keyframes float-sway {
-  0% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-8px);
-  }
-  100% {
-    transform: translateY(0px);
-  }
-}
+/* ── Entrance animation ──────────────────────────────── */
 
-@keyframes rise-in {
-  0% {
-    transform: translateY(14px);
+@keyframes fade-in-up {
+  from {
     opacity: 0;
+    transform: translateY(8px);
   }
-  100% {
-    transform: translateY(0px);
+  to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
-@keyframes glow-pulse {
-  0% {
-    box-shadow: 0 0 0 rgba(20, 20, 32, 0.12);
-  }
-  50% {
-    box-shadow: 0 0 24px rgba(20, 20, 32, 0.2);
-  }
-  100% {
-    box-shadow: 0 0 0 rgba(20, 20, 32, 0.12);
-  }
+.anim-fade-rise {
+  animation: fade-in-up 0.25s ease-out both;
 }
 
-.animate-float-sway {
-  animation: float-sway 8s ease-in-out infinite;
+/* ── Stagger delay utility classes ───────────────────── */
+
+.stagger-1 {
+  animation-delay: 0.03s;
+}
+.stagger-2 {
+  animation-delay: 0.06s;
+}
+.stagger-3 {
+  animation-delay: 0.09s;
+}
+.stagger-4 {
+  animation-delay: 0.12s;
+}
+.stagger-5 {
+  animation-delay: 0.15s;
+}
+.stagger-6 {
+  animation-delay: 0.18s;
+}
+.stagger-7 {
+  animation-delay: 0.21s;
+}
+.stagger-8 {
+  animation-delay: 0.24s;
 }
 
-.animate-rise-in {
-  animation: rise-in 0.45s ease-out both;
+/* ── Focus ring ──────────────────────────────────────── */
+
+.focus-ring {
+  @apply outline-none;
+  transition: box-shadow 0.15s ease;
 }
 
-.animate-glow-pulse {
-  animation: glow-pulse 3.5s ease-in-out infinite;
+.focus-ring:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--background),
+    0 0 0 4px var(--primary);
+}
+
+/* ── Subtle hover lift for interactive cards ─────────── */
+
+.hover-lift {
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.hover-lift:hover {
+  background-color: #f7f8fa;
+  border-color: #d0d3db;
 }

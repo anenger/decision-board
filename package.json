@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.21.0",
+    "@convex-dev/migrations": "^0.3.1",
     "@convex-dev/react-query": "^0.1.0",
     "@t3-oss/env-core": "^0.13.8",
     "@tailwindcss/vite": "^4.0.6",

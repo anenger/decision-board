@@ -31,31 +31,36 @@ export default function DecisionCreateModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70 px-4 py-10 backdrop-blur">
-      <div className="relative w-full max-w-lg rounded-4xl border border-white/80 bg-white p-8 shadow-[0_30px_80px_rgba(15,23,42,0.18)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-8 backdrop-blur-sm">
+      <div className="relative w-full max-w-lg rounded-xl border border-[#e2e4ea] bg-white p-6 shadow-[0_24px_48px_rgba(0,0,0,0.12)]">
+        {/* Close button */}
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-5 top-5 rounded-full border border-slate-100 bg-white p-2 text-slate-400 shadow-[0_10px_25px_rgba(15,23,42,0.08)] transition hover:text-slate-600"
+          className="focus-ring absolute right-4 top-4 inline-flex h-7 w-7 items-center justify-center rounded-md text-[#9a9daa] transition-colors hover:bg-[#f0f1f4] hover:text-[#3a3a4a]"
         >
-          <X size={18} />
+          <X size={15} />
         </button>
-        <div className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.4em] text-slate-300">
+
+        {/* Header */}
+        <div>
+          <p className="font-['IBM_Plex_Mono',monospace] text-[11px] font-medium tracking-[0.04em] uppercase text-[#9a9daa]">
             New decision
           </p>
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Ask a question
+          <h2 className="mt-1.5 text-[18px] font-semibold tracking-[-0.02em] text-[#1a1a2e]">
+            Ask one clear question
           </h2>
         </div>
-        <div className="mt-6 space-y-4">
-          <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+
+        {/* Form */}
+        <div className="mt-5 space-y-4">
+          <div className="space-y-1.5">
+            <label className="font-['IBM_Plex_Mono',monospace] text-[11px] font-medium tracking-[0.04em] uppercase text-[#9a9daa]">
               Question
             </label>
             <input
-              className="w-full rounded-3xl border border-slate-100 bg-white px-4 py-3 text-sm text-slate-900 shadow-[0_10px_30px_rgba(15,23,42,0.08)] outline-none transition focus:border-slate-200"
-              placeholder="What flavor of ice cream do you want?"
+              className="focus-ring w-full rounded-lg border border-[#e2e4ea] bg-[#fafbfc] px-3 py-2.5 text-[14px] text-[#1a1a2e] placeholder:text-[#a0a3b1]"
+              placeholder="Where should we host the launch party?"
               value={draft.title}
               onChange={(event) =>
                 onDraftChange((prev) => ({
@@ -65,15 +70,17 @@ export default function DecisionCreateModal({
               }
             />
           </div>
-          <div className="space-y-3">
-            <label className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+
+          <div className="space-y-1.5">
+            <label className="font-['IBM_Plex_Mono',monospace] text-[11px] font-medium tracking-[0.04em] uppercase text-[#9a9daa]">
               Options
             </label>
-            <div className="space-y-3">
+
+            <div className="space-y-2">
               {draft.options.map((option, index) => (
                 <input
                   key={`draft-option-${index}`}
-                  className="w-full rounded-3xl border border-slate-100 bg-white px-4 py-3 text-sm text-slate-900 shadow-[0_10px_30px_rgba(15,23,42,0.08)] outline-none transition focus:border-slate-200"
+                  className="focus-ring w-full rounded-lg border border-[#e2e4ea] bg-[#fafbfc] px-3 py-2.5 text-[14px] text-[#1a1a2e] placeholder:text-[#a0a3b1]"
                   placeholder="Add an option"
                   value={option}
                   onChange={(event) =>
@@ -87,33 +94,37 @@ export default function DecisionCreateModal({
                 />
               ))}
             </div>
+
             <button
               type="button"
               onClick={onAddOption}
-              className="flex items-center gap-2 rounded-full border border-slate-100 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400 shadow-[0_12px_30px_rgba(15,23,42,0.08)]"
+              className="focus-ring inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] font-medium text-[#6b6f80] transition-colors hover:bg-[#f0f1f4] hover:text-[#3a3a4a]"
             >
-              <Plus size={16} />
+              <Plus size={12} />
               Add option
             </button>
           </div>
         </div>
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+
+        {/* Actions */}
+        <div className="mt-6 flex gap-2">
           <button
             type="button"
             onClick={onCreate}
             disabled={!canSubmit}
-            className={`flex-1 rounded-full px-6 py-3 text-sm font-semibold shadow-[0_18px_40px_rgba(15,23,42,0.18)] transition ${
+            className={`focus-ring flex-1 rounded-lg px-4 py-2.5 text-[13px] font-medium transition-colors ${
               canSubmit
-                ? 'bg-slate-900 text-white hover:-translate-y-0.5'
-                : 'cursor-not-allowed bg-slate-200 text-slate-400'
+                ? 'bg-[#4f6df5] text-white hover:bg-[#4059d9]'
+                : 'cursor-not-allowed bg-[#f0f1f4] text-[#a0a3b1]'
             }`}
           >
-            Create
+            Create decision
           </button>
+
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-500 shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
+            className="focus-ring rounded-lg border border-[#e2e4ea] bg-white px-4 py-2.5 text-[13px] font-medium text-[#3a3a4a] transition-colors hover:bg-[#fafbfc]"
           >
             Cancel
           </button>

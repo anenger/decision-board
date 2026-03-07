@@ -1,180 +1,200 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useCallback, useMemo, useState } from 'react'
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import type { Doc, Id } from '../../convex/_generated/dataModel'
-import DecisionBoardHeader from '@/components/DecisionBoardHeader'
-import DecisionCard from '@/components/DecisionCard'
-import DecisionCreateModal from '@/components/DecisionCreateModal'
+import { ArrowRight, CircleDot, LayoutGrid, Plus } from 'lucide-react'
+import { useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { login } from '@/lib/session'
 import { Loader } from '@/components/Loader'
-import {
-  decisionQueries,
-  useAddOptionMutation,
-  useCreateDecisionMutation,
-  useDeleteDecisionMutation,
-  useRemoveOptionMutation,
-  useUpdateDecisionMutation,
-  useVoteMutation,
-} from '@/data/queries'
+import { boardQueries, useCreateBoardMutation } from '@/data/queries'
+
+const relativeFormatter = new Intl.RelativeTimeFormat('en', {
+  numeric: 'auto',
+})
+
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+})
+
+function formatRelativeDate(timestamp: number) {
+  const now = Date.now()
+  const diff = now - timestamp
+  const seconds = Math.floor(diff / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+
+  if (days > 30) return dateFormatter.format(new Date(timestamp))
+  if (days > 0) return relativeFormatter.format(-days, 'day')
+  if (hours > 0) return relativeFormatter.format(-hours, 'hour')
+  if (minutes > 0) return relativeFormatter.format(-minutes, 'minute')
+  return 'Just now'
+}
 
 export const Route = createFileRoute('/')({
   pendingComponent: () => <Loader />,
   loader: async ({ context: { queryClient } }) => {
     const voterId = await login()
-    queryClient.ensureQueryData(decisionQueries.list(voterId))
+    await queryClient.ensureQueryData(boardQueries.listMine(voterId))
     return { voterId }
   },
-  component: DecisionBoard,
+  component: BoardsHome,
 })
 
-type OptionWithVotes = Doc<'options'> & {
-  votes: number
-}
-
-type DecisionWithOptions = Doc<'decisions'> & {
-  options: Array<OptionWithVotes>
-}
-
-type DecisionDraft = {
-  title: string
-  options: Array<string>
-}
-
-const initialDraft: DecisionDraft = {
-  title: '',
-  options: [''],
-}
-
-function DecisionBoard() {
+function BoardsHome() {
+  const navigate = useNavigate({ from: '/' })
   const { voterId } = Route.useLoaderData()
-  const { data: decisions } = useSuspenseQuery(decisionQueries.list(voterId))
-  const { mutate: addDecision } = useCreateDecisionMutation()
-  const { mutate: removeDecision } = useDeleteDecisionMutation()
-  const { mutate: updateDecision } = useUpdateDecisionMutation()
-  const { mutate: addOption } = useAddOptionMutation()
-  const { mutate: removeOption } = useRemoveOptionMutation()
-  const { mutate: vote } = useVoteMutation()
+  const { data: boards } = useSuspenseQuery(boardQueries.listMine(voterId))
+  const { mutateAsync: createBoard, isPending } = useCreateBoardMutation()
 
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [draft, setDraft] = useState<DecisionDraft>(initialDraft)
+  const [boardName, setBoardName] = useState('')
+  const boardNameRef = useRef<HTMLInputElement | null>(null)
 
-  const sanitizedDraftOptions = useMemo(
-    () =>
-      draft.options
-        .map((option) => option.trim())
-        .filter((option) => option.length > 0),
-    [draft.options],
-  )
+  const canCreate = boardName.trim().length > 0 && !isPending
 
-  const canSubmit =
-    draft.title.trim().length > 0 && sanitizedDraftOptions.length >= 1
+  const handleCreateBoard = async () => {
+    if (!canCreate) return
 
-  const handleCreateDecision = () => {
-    if (!canSubmit) return
-    const title = draft.title.trim()
-
-    addDecision({
-      title,
-      options: sanitizedDraftOptions,
+    const boardId = await createBoard({
+      voterId,
+      name: boardName.trim(),
     })
 
-    setDraft(initialDraft)
-    setIsModalOpen(false)
+    setBoardName('')
+    navigate({ to: '/boards/$boardId', params: { boardId } })
   }
 
-  const handleCloseModal = () => {
-    setDraft(initialDraft)
-    setIsModalOpen(false)
-  }
+  const handleBoardNameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return
 
-  const handleRemoveDecision = useCallback(
-    (decisionId: Id<'decisions'>) => {
-      removeDecision({ id: decisionId })
-    },
-    [removeDecision],
-  )
-
-  const handleUpdateDecision = (
-    decision: DecisionWithOptions,
-    payload: { title: string; options: Array<string> },
-  ) => {
-    updateDecision({
-      id: decision._id,
-      title: payload.title,
-    })
-
-    const existingOptions = decision.options
-    const trimmedOptions = payload.options
-      .map((option) => option.trim())
-      .filter((option) => option.length > 0)
-
-    const removeTargets = existingOptions.filter(
-      (option) => !trimmedOptions.includes(option.text),
-    )
-
-    Promise.all(removeTargets.map((option) => removeOption({ id: option._id })))
-
-    const existingTexts = new Set(existingOptions.map((option) => option.text))
-    const nextOptions = trimmedOptions.filter(
-      (option) => !existingTexts.has(option),
-    )
-
-    Promise.all(
-      nextOptions.map((text, index) =>
-        addOption({
-          decisionId: decision._id,
-          text,
-          position: existingOptions.length + index,
-        }),
-      ),
-    )
+    event.preventDefault()
+    void handleCreateBoard()
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <DecisionBoardHeader onCreate={() => setIsModalOpen(true)} />
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-20 pt-10">
-        {decisions.length === 0 ? (
-          <div className="rounded-4xl border border-white/70 bg-white/80 p-10 text-center text-sm text-slate-500 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-            No decisions yet. Start by creating one.
+    <div className="min-h-screen bg-[#f7f8fa]">
+      {/* ── Top bar ──────────────────────────────────────── */}
+      <header className="border-b border-[#e2e4ea] bg-white">
+        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#4f6df5]">
+              <LayoutGrid size={14} className="text-white" />
+            </div>
+            <span className="text-[15px] font-semibold tracking-[-0.01em] text-[#1a1a2e]">
+              Decision Board
+            </span>
           </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2">
-            {decisions.map((decision) => (
-              <DecisionCard
-                key={decision._id}
-                decision={decision}
-                onVote={(optionId: Id<'options'>) => {
-                  vote({
-                    optionId,
-                    voterId,
-                    decisionId: decision._id,
-                  })
-                }}
-                onDelete={() => handleRemoveDecision(decision._id)}
-                onSave={(payload: { title: string; options: Array<string> }) =>
-                  handleUpdateDecision(decision, payload)
-                }
-              />
-            ))}
-          </div>
-        )}
-      </main>
 
-      <DecisionCreateModal
-        isOpen={isModalOpen}
-        draft={draft}
-        onDraftChange={setDraft}
-        onAddOption={() =>
-          setDraft((prev) => ({
-            ...prev,
-            options: [...prev.options, ''],
-          }))
-        }
-        onClose={handleCloseModal}
-        onCreate={handleCreateDecision}
-        canSubmit={canSubmit}
-      />
+          <div className="flex items-center gap-2">
+            <span className="hidden text-[13px] text-[#6b6f80] sm:inline">
+              {boards.length} board{boards.length === 1 ? '' : 's'}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Main content ─────────────────────────────────── */}
+      <main className="mx-auto max-w-5xl px-5 py-8">
+        {/* Page heading + create row */}
+        <div className="anim-fade-rise flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#1a1a2e]">
+              Your boards
+            </h1>
+            <p className="mt-1 text-[13px] text-[#6b6f80]">
+              Create and manage collaborative decision boards
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              ref={boardNameRef}
+              type="text"
+              placeholder="Board name…"
+              value={boardName}
+              onChange={(event) => setBoardName(event.target.value)}
+              onKeyDown={handleBoardNameKeyDown}
+              className="focus-ring h-9 w-full rounded-lg border border-[#e2e4ea] bg-white px-3 text-[13px] text-[#1a1a2e] placeholder:text-[#a0a3b1] sm:w-56"
+            />
+            <button
+              type="button"
+              onClick={handleCreateBoard}
+              disabled={!canCreate}
+              className={`focus-ring inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3.5 text-[13px] font-medium transition-colors ${
+                canCreate
+                  ? 'bg-[#4f6df5] text-white hover:bg-[#4059d9]'
+                  : 'cursor-not-allowed bg-[#e2e4ea] text-[#a0a3b1]'
+              }`}
+            >
+              <Plus size={14} />
+              <span className="hidden sm:inline">New board</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Board list */}
+        <div className="mt-6">
+          {boards.length === 0 ? (
+            <div className="anim-fade-rise rounded-xl border border-dashed border-[#d0d3db] bg-white px-6 py-16 text-center">
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[#f0f1f4]">
+                <LayoutGrid size={18} className="text-[#6b6f80]" />
+              </div>
+              <h2 className="mt-4 text-[15px] font-semibold text-[#1a1a2e]">
+                No boards yet
+              </h2>
+              <p className="mt-1.5 text-[13px] text-[#6b6f80]">
+                Create your first board to start making decisions together.
+              </p>
+              <button
+                type="button"
+                onClick={() => boardNameRef.current?.focus()}
+                className="focus-ring mt-5 inline-flex items-center gap-2 rounded-lg bg-[#4f6df5] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-[#4059d9]"
+              >
+                Create a board
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          ) : (
+            <div className="anim-fade-rise overflow-hidden rounded-xl border border-[#e2e4ea] bg-white">
+              {/* Table header */}
+              <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-[#e2e4ea] bg-[#fafbfc] px-5 py-2.5 text-[11px] font-medium tracking-[0.04em] uppercase text-[#6b6f80]">
+                <span>Name</span>
+                <span className="hidden w-28 text-right sm:block">Created</span>
+                <span className="w-16" />
+              </div>
+
+              {/* Board rows */}
+              {boards.map((board, index) => (
+                <Link
+                  key={board._id}
+                  to="/boards/$boardId"
+                  params={{ boardId: board._id }}
+                  className={`hover-lift group grid grid-cols-[1fr_auto_auto] items-center gap-4 px-5 py-3.5 ${
+                    index < boards.length - 1 ? 'border-b border-[#f0f1f4]' : ''
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <CircleDot size={15} className="shrink-0 text-[#4f6df5]" />
+                    <span className="truncate text-[14px] font-medium text-[#1a1a2e]">
+                      {board.name}
+                    </span>
+                  </div>
+
+                  <span className="hidden w-28 text-right font-['IBM_Plex_Mono',monospace] text-[12px] text-[#9a9daa] sm:block">
+                    {formatRelativeDate(board._creationTime)}
+                  </span>
+
+                  <span className="flex w-16 items-center justify-end gap-1 text-[13px] text-[#9a9daa] transition-colors group-hover:text-[#4f6df5]">
+                    Open
+                    <ArrowRight size={13} />
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   )
 }

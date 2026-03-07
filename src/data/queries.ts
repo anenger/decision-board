@@ -1,9 +1,21 @@
 import { convexQuery, useConvexMutation } from '@convex-dev/react-query'
 import { useMutation } from '@tanstack/react-query'
 import { api } from 'convex/_generated/api'
+import type { Id } from '../../convex/_generated/dataModel'
+
+export const boardQueries = {
+  listMine: (voterId: string) => convexQuery(api.boards.listMine, { voterId }),
+  get: (boardId: Id<'boards'>) => convexQuery(api.boards.get, { boardId }),
+}
+
+export function useCreateBoardMutation() {
+  const createBoard = useConvexMutation(api.boards.create)
+  return useMutation({ mutationFn: createBoard })
+}
 
 export const decisionQueries = {
-  list: (voterId: string) => convexQuery(api.decisions.list, { voterId }),
+  listByBoard: (boardId: Id<'boards'>, voterId: string) =>
+    convexQuery(api.decisions.listByBoard, { boardId, voterId }),
 }
 
 export function useCreateDecisionMutation() {
@@ -34,14 +46,15 @@ export function useRemoveOptionMutation() {
 export function useVoteMutation() {
   const mutationFn = useConvexMutation(api.decisions.vote).withOptimisticUpdate(
     (localStore, args) => {
-      const { decisionId, optionId, voterId: localVoterId } = args
-      const currentValue = localStore.getQuery(api.decisions.list, {
+      const { boardId, decisionId, optionId, voterId: localVoterId } = args
+      const currentValue = localStore.getQuery(api.decisions.listByBoard, {
+        boardId,
         voterId: localVoterId,
       })
       if (currentValue !== undefined) {
         localStore.setQuery(
-          api.decisions.list,
-          { voterId: localVoterId },
+          api.decisions.listByBoard,
+          { boardId, voterId: localVoterId },
           currentValue.map((decision) => {
             if (decision._id !== decisionId) return decision
             return {
