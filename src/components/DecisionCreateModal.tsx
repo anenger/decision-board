@@ -43,14 +43,9 @@ export default function DecisionCreateModal({
         </button>
 
         {/* Header */}
-        <div>
-          <p className="font-['IBM_Plex_Mono',monospace] text-[11px] font-medium tracking-[0.04em] uppercase text-[#9a9daa]">
-            New decision
-          </p>
-          <h2 className="mt-1.5 text-[18px] font-semibold tracking-[-0.02em] text-[#1a1a2e]">
-            Ask one clear question
-          </h2>
-        </div>
+        <h2 className="text-[18px] font-semibold tracking-[-0.02em] text-[#1a1a2e]">
+          New decision
+        </h2>
 
         {/* Form */}
         <div className="mt-5 space-y-4">

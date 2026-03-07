@@ -2,7 +2,7 @@ import { createFileRoute, notFound, useNavigate } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { ArrowLeft, Check, LayoutGrid, Plus, Share2 } from 'lucide-react'
-import type { Doc, Id } from '../../convex/_generated/dataModel'
+import type { Id } from '../../convex/_generated/dataModel'
 import DecisionCard from '@/components/DecisionCard'
 import DecisionCreateModal from '@/components/DecisionCreateModal'
 import { login } from '@/lib/session'
@@ -13,7 +13,6 @@ import {
   useAddOptionMutation,
   useCreateDecisionMutation,
   useDeleteDecisionMutation,
-  useRemoveOptionMutation,
   useUpdateDecisionMutation,
   useVoteMutation,
 } from '@/data/queries'
@@ -43,15 +42,6 @@ export const Route = createFileRoute('/boards/$boardId')({
   component: BoardRoute,
 })
 
-type OptionWithVotes = Doc<'options'> & {
-  votes: number
-  isSelected: boolean
-}
-
-type DecisionWithOptions = Doc<'decisions'> & {
-  options: Array<OptionWithVotes>
-}
-
 type DecisionDraft = {
   title: string
   options: Array<string>
@@ -80,7 +70,6 @@ function BoardRoute() {
   const { mutate: removeDecision } = useDeleteDecisionMutation()
   const { mutate: updateDecision } = useUpdateDecisionMutation()
   const { mutate: addOption } = useAddOptionMutation()
-  const { mutate: removeOption } = useRemoveOptionMutation()
   const { mutate: vote } = useVoteMutation()
 
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -137,42 +126,6 @@ function BoardRoute() {
     },
     [removeDecision],
   )
-
-  const handleUpdateDecision = (
-    decision: DecisionWithOptions,
-    payload: { title: string; options: Array<string> },
-  ) => {
-    updateDecision({
-      id: decision._id,
-      title: payload.title,
-    })
-
-    const existingOptions = decision.options
-    const trimmedOptions = payload.options
-      .map((option) => option.trim())
-      .filter((option) => option.length > 0)
-
-    const removeTargets = existingOptions.filter(
-      (option) => !trimmedOptions.includes(option.text),
-    )
-
-    Promise.all(removeTargets.map((option) => removeOption({ id: option._id })))
-
-    const existingTexts = new Set(existingOptions.map((option) => option.text))
-    const nextOptions = trimmedOptions.filter(
-      (option) => !existingTexts.has(option),
-    )
-
-    Promise.all(
-      nextOptions.map((text, index) =>
-        addOption({
-          decisionId: decision._id,
-          text,
-          position: existingOptions.length + index,
-        }),
-      ),
-    )
-  }
 
   const handleShareBoard = useCallback(async () => {
     if (typeof window === 'undefined') return
@@ -312,10 +265,16 @@ function BoardRoute() {
                       })
                     }}
                     onDelete={() => handleRemoveDecision(decision._id)}
-                    onSave={(payload: {
-                      title: string
-                      options: Array<string>
-                    }) => handleUpdateDecision(decision, payload)}
+                    onRename={(title: string) =>
+                      updateDecision({ id: decision._id, title })
+                    }
+                    onAddOption={(text: string) =>
+                      addOption({
+                        decisionId: decision._id,
+                        text,
+                        position: decision.options.length,
+                      })
+                    }
                   />
                 </div>
               ))}

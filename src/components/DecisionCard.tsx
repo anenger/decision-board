@@ -1,6 +1,6 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useMemo, useRef, useState } from 'react'
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react'
-import type { ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 
 import type { Doc, Id } from '../../convex/_generated/dataModel'
 
@@ -17,12 +17,8 @@ type DecisionCardProps = {
   decision: DecisionWithOptions
   onVote: (optionId: Id<'options'>) => void
   onDelete: () => void
-  onSave: (payload: { title: string; options: Array<string> }) => void
-}
-
-type DecisionDraft = {
-  title: string
-  options: Array<string>
+  onRename: (title: string) => void
+  onAddOption: (text: string) => void
 }
 
 type DecisionOptionRowProps = {
@@ -35,19 +31,6 @@ type VoteMetrics = {
   totalVotes: number
   totalOptions: number
   rows: Array<{ option: OptionWithVotes; fillWidth: string }>
-}
-
-function createDraft(decision: DecisionWithOptions): DecisionDraft {
-  return {
-    title: decision.title,
-    options: decision.options.map((option) => option.text),
-  }
-}
-
-function sanitizeOptions(options: Array<string>) {
-  return options
-    .map((option) => option.trim())
-    .filter((option) => option.length > 0)
 }
 
 function calculateVoteMetrics(options: Array<OptionWithVotes>): VoteMetrics {
@@ -143,78 +126,79 @@ export default function DecisionCard({
   decision,
   onVote,
   onDelete,
-  onSave,
+  onRename,
+  onAddOption,
 }: DecisionCardProps) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [draft, setDraft] = useState<DecisionDraft>(() => createDraft(decision))
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(decision.title)
+  const [newOption, setNewOption] = useState('')
+  const newOptionRef = useRef<HTMLInputElement | null>(null)
 
   const voteMetrics = useMemo(
     () => calculateVoteMetrics(decision.options),
     [decision.options],
   )
 
-  const sanitizedOptions = useMemo(
-    () => sanitizeOptions(draft.options),
-    [draft.options],
-  )
-
-  const canSave = draft.title.trim().length > 0 && sanitizedOptions.length >= 1
-
-  const resetDraft = () => {
-    setDraft(createDraft(decision))
+  const startEditTitle = () => {
+    setTitleDraft(decision.title)
+    setIsEditingTitle(true)
   }
 
-  const startEdit = () => {
-    resetDraft()
-    setIsEditing(true)
+  const cancelEditTitle = () => {
+    setIsEditingTitle(false)
+    setTitleDraft(decision.title)
   }
 
-  const cancelEdit = () => {
-    setIsEditing(false)
-    resetDraft()
+  const saveTitle = () => {
+    const trimmed = titleDraft.trim()
+    if (trimmed.length === 0) return
+    onRename(trimmed)
+    setIsEditingTitle(false)
   }
 
-  const updateDraftOption = (index: number, value: string) => {
-    setDraft((prev) => ({
-      ...prev,
-      options: prev.options.map((entry, entryIndex) =>
-        entryIndex === index ? value : entry,
-      ),
-    }))
+  const handleTitleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      saveTitle()
+    } else if (event.key === 'Escape') {
+      cancelEditTitle()
+    }
   }
 
-  const addDraftOption = () => {
-    setDraft((prev) => ({
-      ...prev,
-      options: [...prev.options, ''],
-    }))
+  const handleAddOption = () => {
+    const trimmed = newOption.trim()
+    if (trimmed.length === 0) return
+    onAddOption(trimmed)
+    setNewOption('')
+    newOptionRef.current?.focus()
   }
 
-  const handleSave = () => {
-    if (!canSave) return
-    onSave({
-      title: draft.title.trim(),
-      options: sanitizedOptions,
-    })
-    setIsEditing(false)
+  const handleNewOptionKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      handleAddOption()
+    }
   }
 
   return (
     <article className="rounded-xl border border-[#e2e4ea] bg-white p-5">
       {/* Card header */}
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          {isEditing ? (
-            <input
-              className="focus-ring w-full rounded-lg border border-[#e2e4ea] bg-[#fafbfc] px-3 py-2 text-[15px] font-semibold text-[#1a1a2e] placeholder:text-[#a0a3b1]"
-              value={draft.title}
-              onChange={(event) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  title: event.target.value,
-                }))
-              }
-            />
+        <div className="min-w-0 flex-1">
+          {isEditingTitle ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                className="focus-ring w-full rounded-lg border border-[#e2e4ea] bg-[#fafbfc] px-3 py-1.5 text-[15px] font-semibold text-[#1a1a2e] placeholder:text-[#a0a3b1]"
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onKeyDown={handleTitleKeyDown}
+                onBlur={saveTitle}
+              />
+              <IconButton onClick={cancelEditTitle} label="Cancel editing">
+                <X size={14} />
+              </IconButton>
+            </div>
           ) : (
             <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[#1a1a2e]">
               {decision.title}
@@ -230,70 +214,49 @@ export default function DecisionCard({
         </div>
 
         <div className="flex shrink-0 gap-0.5">
-          {isEditing ? (
-            <IconButton onClick={cancelEdit} label="Cancel editing">
-              <X size={14} />
-            </IconButton>
-          ) : (
-            <IconButton onClick={startEdit} label="Edit decision">
+          {!isEditingTitle && (
+            <IconButton onClick={startEditTitle} label="Edit title">
               <Pencil size={13} />
             </IconButton>
           )}
-
           <IconButton onClick={onDelete} destructive label="Delete decision">
             <Trash2 size={13} />
           </IconButton>
         </div>
       </div>
 
-      {/* Options */}
+      {/* Options — always visible */}
       <div className="mt-4 space-y-2">
-        {isEditing ? (
-          <div className="space-y-2">
-            {draft.options.map((option, index) => (
-              <input
-                key={`${decision._id}-option-${index}`}
-                className="focus-ring w-full rounded-lg border border-[#e2e4ea] bg-[#fafbfc] px-3 py-2 text-[13px] text-[#1a1a2e] placeholder:text-[#a0a3b1]"
-                placeholder="Option text…"
-                value={option}
-                onChange={(event) =>
-                  updateDraftOption(index, event.target.value)
-                }
-              />
-            ))}
+        {voteMetrics.rows.map(({ option, fillWidth }) => (
+          <DecisionOptionRow
+            key={option._id}
+            option={option}
+            fillWidth={fillWidth}
+            onVote={onVote}
+          />
+        ))}
 
+        {/* Persistent add option */}
+        <div className="flex items-center gap-1.5">
+          <input
+            ref={newOptionRef}
+            type="text"
+            placeholder="Add option…"
+            value={newOption}
+            onChange={(event) => setNewOption(event.target.value)}
+            onKeyDown={handleNewOptionKeyDown}
+            className="focus-ring w-full rounded-lg border border-dashed border-[#e2e4ea] bg-transparent px-3 py-2 text-[13px] text-[#1a1a2e] placeholder:text-[#a0a3b1]"
+          />
+          {newOption.trim().length > 0 && (
             <button
               type="button"
-              onClick={addDraftOption}
-              className="focus-ring inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] font-medium text-[#6b6f80] transition-colors hover:bg-[#f0f1f4] hover:text-[#3a3a4a]"
+              onClick={handleAddOption}
+              className="focus-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#4f6df5] transition-colors hover:bg-[#4f6df5]/8"
             >
-              <Plus size={12} />
-              Add option
+              <Plus size={15} />
             </button>
-
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={!canSave}
-              className={`focus-ring w-full rounded-lg px-3 py-2 text-[13px] font-medium transition-colors ${
-                canSave
-                  ? 'bg-[#4f6df5] text-white hover:bg-[#4059d9]'
-                  : 'cursor-not-allowed bg-[#f0f1f4] text-[#a0a3b1]'
-              }`}
-            >
-              Save changes
-            </button>
-          </div>
-        ) : (
-          voteMetrics.rows.map(({ option, fillWidth }) => (
-            <DecisionOptionRow
-              key={option._id}
-              option={option}
-              fillWidth={fillWidth}
-              onVote={onVote}
-            />
-          ))
-        )}
+          )}
+        </div>
       </div>
     </article>
   )
