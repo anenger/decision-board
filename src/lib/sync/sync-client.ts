@@ -46,7 +46,13 @@ export class SyncClient<T> {
   disconnect() {
     this.shouldBeOnline = false
     clearTimeout(this.reconnectTimer)
-    this.socket?.close()
+
+    // Detach now rather than waiting for the close handshake, so a quick
+    // reconnect opens a fresh socket instead of finding this one CLOSING.
+    const socket = this.socket
+    this.socket = null
+    socket?.close(1000, 'Client disconnected')
+    this.update({ status: 'offline' })
   }
 
   change(changeFn: ChangeFn<T>) {

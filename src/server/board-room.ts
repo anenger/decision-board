@@ -83,8 +83,13 @@ export class BoardRoom extends DurableObject<Env> {
 
   override webSocketClose(ws: WebSocket, code: number, reason: string) {
     this.syncStates.delete(ws)
+    // Complete the close handshake, or the client hangs in CLOSING. A close
+    // without a status arrives as 1005, which is reserved and can't be sent
+    // back, so echo only codes that may be sent and use 1000 otherwise.
+    const replyCode =
+      code === 1000 || (code >= 3000 && code <= 4999) ? code : 1000
     try {
-      ws.close(code, reason)
+      ws.close(replyCode, reason)
     } catch {
       // Already closed.
     }
