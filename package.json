@@ -17,6 +17,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
   },
   "dependencies": {
+    "@automerge/automerge": "^3.5.0",
     "@cloudflare/vite-plugin": "^1.21.0",
     "@tailwindcss/vite": "^4.0.6",
     "@tanstack/react-devtools": "^0.7.0",

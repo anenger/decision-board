@@ -5,13 +5,29 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	"main": "@tanstack/react-start/server-entry",
+	"main": "./src/server.ts",
 	"d1_databases": [
 		{
 			"binding": "DB",
 			"database_name": "decision-board",
 			"database_id": "850a44ca-4129-45c3-9f06-4e19a6e085a9",
 			"migrations_dir": "drizzle"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "BOARD_ROOM",
+				"class_name": "BoardRoom"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"BoardRoom"
+			]
 		}
 	]
 }
