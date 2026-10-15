@@ -62,10 +62,7 @@ export const options = sqliteTable(
       .references(() => user.id, { onDelete: 'cascade' }),
   },
   (table) => [
-    index('options_decision_position_idx').on(
-      table.decisionId,
-      table.position,
-    ),
+    index('options_decision_position_idx').on(table.decisionId, table.position),
   ],
 )
 

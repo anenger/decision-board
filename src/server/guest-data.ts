@@ -1,14 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm'
-import type { BatchItem } from 'drizzle-orm/batch'
-import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core'
+import type { BatchingDb } from '@/db/types'
 import * as schema from '@/db/schema'
-
-// Any async SQLite database with batch support: D1 in the app, libSQL in tests.
-type BatchingDb = BaseSQLiteDatabase<'async', unknown, typeof schema> & {
-  batch: (
-    queries: readonly [BatchItem<'sqlite'>, ...Array<BatchItem<'sqlite'>>],
-  ) => Promise<unknown>
-}
 
 /**
  * Moves a guest's boards, decisions, options and votes to the account they

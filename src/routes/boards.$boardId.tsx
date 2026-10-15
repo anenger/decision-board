@@ -2,29 +2,24 @@ import { createFileRoute, notFound, useNavigate } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { ArrowLeft, Check, LayoutGrid, Plus, Share2 } from 'lucide-react'
+import type { BoardSnapshot } from '@/lib/board-sync/protocol'
 import DecisionCard from '@/components/DecisionCard'
 import DecisionCreateModal from '@/components/DecisionCreateModal'
 import { Loader } from '@/components/Loader'
 import { AccountMenu } from '@/components/AccountMenu'
-import {
-  boardQueries,
-  sessionQuery,
-  useAddOptionMutation,
-  useCreateDecisionMutation,
-  useDeleteDecisionMutation,
-  useRenameDecisionMutation,
-  useVoteMutation,
-} from '@/data/queries'
+import { SyncError, SyncStatus } from '@/components/SyncStatus'
+import { boardQueries, sessionQuery } from '@/data/queries'
+import { useBoardSync } from '@/lib/board-sync/use-board-sync'
 
 export const Route = createFileRoute('/boards/$boardId')({
   pendingComponent: () => <Loader />,
   loader: async ({ context: { queryClient }, params: { boardId } }) => {
-    const [details] = await Promise.all([
+    const [snapshot] = await Promise.all([
       queryClient.ensureQueryData(boardQueries.detail(boardId)),
       queryClient.ensureQueryData(sessionQuery),
     ])
 
-    if (!details) {
+    if (!snapshot) {
       throw notFound()
     }
   },
@@ -48,17 +43,43 @@ const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
 })
 
 function BoardRoute() {
-  const navigate = useNavigate({ from: '/boards/$boardId' })
   const { boardId } = Route.useParams()
-  const { data: details } = useSuspenseQuery(boardQueries.detail(boardId))
-  const board = details?.board
-  const decisions = details?.decisions ?? []
+  const { data: snapshot } = useSuspenseQuery(boardQueries.detail(boardId))
+  const { data: session } = useSuspenseQuery(sessionQuery)
 
-  const { mutate: addDecision } = useCreateDecisionMutation(boardId)
-  const { mutate: removeDecision } = useDeleteDecisionMutation(boardId)
-  const { mutate: renameDecision } = useRenameDecisionMutation(boardId)
-  const { mutate: addOption } = useAddOptionMutation(boardId)
-  const { mutate: vote } = useVoteMutation(boardId)
+  if (!snapshot) return null
+
+  // Keyed so switching boards opens a fresh connection.
+  return (
+    <LiveBoard
+      key={boardId}
+      boardId={boardId}
+      initial={snapshot}
+      viewerId={session.viewer?.id ?? null}
+    />
+  )
+}
+
+function LiveBoard({
+  boardId,
+  initial,
+  viewerId,
+}: {
+  boardId: string
+  initial: BoardSnapshot
+  viewerId: string | null
+}) {
+  const navigate = useNavigate({ from: '/boards/$boardId' })
+  const {
+    details,
+    myVotes,
+    status,
+    pendingCount,
+    error,
+    submit,
+    dismissError,
+  } = useBoardSync(boardId, initial, viewerId)
+  const { board, decisions } = details
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [draft, setDraft] = useState<DecisionDraft>(initialDraft)
@@ -93,9 +114,14 @@ function BoardRoute() {
     if (!canSubmit) return
     const title = draft.title.trim()
 
-    addDecision({
+    submit({
+      kind: 'createDecision',
+      decisionId: crypto.randomUUID(),
       title,
-      options: sanitizedDraftOptions,
+      options: sanitizedDraftOptions.map((text) => ({
+        id: crypto.randomUUID(),
+        text,
+      })),
     })
 
     setDraft(initialDraft)
@@ -109,9 +135,9 @@ function BoardRoute() {
 
   const handleRemoveDecision = useCallback(
     (decisionId: string) => {
-      removeDecision({ decisionId })
+      submit({ kind: 'deleteDecision', decisionId })
     },
-    [removeDecision],
+    [submit],
   )
 
   const handleShareBoard = useCallback(async () => {
@@ -127,13 +153,7 @@ function BoardRoute() {
     }
   }, [])
 
-  if (!board) {
-    return null
-  }
-
-  const boardCreatedLabel = fullDateFormatter.format(
-    new Date(board.createdAt),
-  )
+  const boardCreatedLabel = fullDateFormatter.format(new Date(board.createdAt))
 
   return (
     <div className="min-h-screen bg-[#f7f8fa]">
@@ -211,7 +231,12 @@ function BoardRoute() {
             <span>·</span>
             <span>{boardCreatedLabel}</span>
           </div>
+          <div className="ml-auto">
+            <SyncStatus status={status} pendingCount={pendingCount} />
+          </div>
         </div>
+
+        {error && <SyncError message={error} onDismiss={dismissError} />}
 
         {/* Decisions */}
         <div className="mt-6">
@@ -245,14 +270,29 @@ function BoardRoute() {
                   <DecisionCard
                     decision={decision}
                     onVote={(optionId: string) => {
-                      vote({ decisionId: decision.id, optionId })
+                      // Voting for your current choice removes the vote.
+                      submit({
+                        kind: 'setVote',
+                        decisionId: decision.id,
+                        optionId:
+                          myVotes[decision.id] === optionId ? null : optionId,
+                      })
                     }}
                     onDelete={() => handleRemoveDecision(decision.id)}
                     onRename={(title: string) =>
-                      renameDecision({ decisionId: decision.id, title })
+                      submit({
+                        kind: 'renameDecision',
+                        decisionId: decision.id,
+                        title,
+                      })
                     }
                     onAddOption={(text: string) =>
-                      addOption({ decisionId: decision.id, text })
+                      submit({
+                        kind: 'addOption',
+                        decisionId: decision.id,
+                        optionId: crypto.randomUUID(),
+                        text,
+                      })
                     }
                   />
                 </div>

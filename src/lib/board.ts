@@ -37,28 +37,3 @@ export function canEditDecision(
     (viewerId === decision.ownerId || viewerId === decision.createdById)
   )
 }
-
-/**
- * Applies a vote the way the server does: voting for your current choice
- * removes the vote, and voting for another option moves it.
- */
-export function applyVote(
-  decision: DecisionView,
-  optionId: string,
-): DecisionView {
-  const previousId = decision.options.find((option) => option.isSelected)?.id
-  const isRemoving = previousId === optionId
-
-  return {
-    ...decision,
-    options: decision.options.map((option) => {
-      if (option.id === previousId) {
-        return { ...option, isSelected: false, votes: option.votes - 1 }
-      }
-      if (option.id === optionId && !isRemoving) {
-        return { ...option, isSelected: true, votes: option.votes + 1 }
-      }
-      return option
-    }),
-  }
-}

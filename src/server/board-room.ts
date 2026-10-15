@@ -1,147 +1,129 @@
-import { DurableObject } from 'cloudflare:workers'
-import * as Automerge from '@automerge/automerge'
-import type { LabDoc } from '@/lib/sync/protocol'
+import { Server } from 'partyserver'
+import { commitOperation, loadBoard, snapshotFor } from './board-store'
+import { clientMessageSchema } from './operation-schema'
+import type { Connection, ConnectionContext, WSMessage } from 'partyserver'
+import type { LoadedBoard } from './board-store'
+import type { ClientMessage, ServerMessage } from '@/lib/board-sync/protocol'
+import { db } from '@/db'
+import { LIMITS } from '@/lib/board-sync/protocol'
 
-const DOC_KEY = 'doc'
+/** Set by the Worker from the session cookie; any client-sent value is replaced. */
+export const VIEWER_ID_HEADER = 'x-viewer-id'
 
-type SocketAttachment = {
-  viewerId: string | null
-  /** Encoded per-connection sync state, so it survives hibernation. */
-  syncState: Uint8Array | null
-}
+type ConnectionState = { viewerId: string | null }
 
 /**
- * One instance per room. Holds the room's Automerge document and syncs it
- * with every connected client over hibernatable WebSockets.
+ * One instance per board, named by board id. It is the only writer for its
+ * board: it checks each operation, saves it to D1, then broadcasts the new
+ * state. D1 stays the source of truth, so the home page and server
+ * rendering keep reading it directly.
  */
-export class BoardRoom extends DurableObject<Env> {
-  private doc: Automerge.Doc<LabDoc> = Automerge.init()
-  private syncStates = new Map<WebSocket, Automerge.SyncState>()
+export class BoardRoom extends Server<Env> {
+  static override options = { hibernate: true }
 
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env)
-    void ctx.blockConcurrencyWhile(async () => {
-      const saved = await ctx.storage.get<Uint8Array>(DOC_KEY)
-      if (saved) {
-        this.doc = Automerge.load(saved)
+  private board: LoadedBoard | null = null
+  /**
+   * Awaiting D1 lets other messages start, so changes run one at a time to
+   * keep each check, write and in-memory update together.
+   */
+  private queue: Promise<unknown> = Promise.resolve()
+
+  override async onStart() {
+    this.board = await loadBoard(db, this.name)
+  }
+
+  override getConnectionTags(_connection: Connection, ctx: ConnectionContext) {
+    const viewerId = ctx.request.headers.get(VIEWER_ID_HEADER)
+    return viewerId ? [viewerId] : []
+  }
+
+  override onConnect(
+    connection: Connection<ConnectionState>,
+    ctx: ConnectionContext,
+  ) {
+    const viewerId = ctx.request.headers.get(VIEWER_ID_HEADER) || null
+    connection.setState({ viewerId })
+
+    return this.serialize(async () => {
+      // Reload so changes made outside this room, like a guest linking their
+      // account, are picked up.
+      this.board = await loadBoard(db, this.name)
+      if (!this.board) {
+        connection.close(4404, 'Board not found')
         return
       }
-      // The server creates the root fields once. If each client created its
-      // own `counter`, they would be conflicting values rather than one
-      // counter, and increments on the losing side would be dropped.
-      this.doc = Automerge.from<LabDoc>({
-        counter: new Automerge.Counter(0),
-        notes: [],
+      send(connection, {
+        type: 'snapshot',
+        viewerId,
+        snapshot: snapshotFor(this.board, viewerId),
       })
-      await this.persist()
     })
   }
 
-  override fetch(request: Request): Response {
-    if (request.headers.get('Upgrade') !== 'websocket') {
-      return new Response('Expected a WebSocket upgrade', { status: 426 })
-    }
+  override onMessage(connection: Connection<ConnectionState>, raw: WSMessage) {
+    if (typeof raw !== 'string' || raw.length > LIMITS.messageBytes) return
 
-    const { 0: client, 1: server } = new WebSocketPair()
-    this.ctx.acceptWebSocket(server)
-    this.setSyncState(server, Automerge.initSyncState(), {
-      viewerId: request.headers.get('x-viewer-id') || null,
-      syncState: null,
-    })
-    this.sendSyncMessage(server)
-
-    return new Response(null, { status: 101, webSocket: client })
-  }
-
-  override async webSocketMessage(
-    ws: WebSocket,
-    message: ArrayBuffer | string,
-  ) {
-    if (typeof message === 'string') return
-
-    const headsBefore = Automerge.getHeads(this.doc).join()
-    const [doc, syncState] = Automerge.receiveSyncMessage(
-      this.doc,
-      this.getSyncState(ws),
-      new Uint8Array(message),
-    )
-    this.doc = doc
-    this.setSyncState(ws, syncState)
-
-    if (Automerge.getHeads(doc).join() === headsBefore) {
-      this.sendSyncMessage(ws)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
       return
     }
 
-    // TODO(phase 3): store incremental changes and compact, instead of
-    // rewriting the whole document on every change.
-    await this.persist()
-    for (const socket of this.ctx.getWebSockets()) {
-      this.sendSyncMessage(socket)
+    const result = clientMessageSchema.safeParse(parsed)
+    if (!result.success) {
+      const opId = (parsed as { opId?: unknown } | null)?.opId
+      if (typeof opId === 'string') {
+        send(connection, { type: 'reject', opId, reason: 'Invalid change' })
+      }
+      return
     }
+
+    return this.serialize(() => this.handleOperation(connection, result.data))
   }
 
-  override webSocketClose(ws: WebSocket, code: number, reason: string) {
-    this.syncStates.delete(ws)
-    // Complete the close handshake, or the client hangs in CLOSING. A close
-    // without a status arrives as 1005, which is reserved and can't be sent
-    // back, so echo only codes that may be sent and use 1000 otherwise.
-    const replyCode =
-      code === 1000 || (code >= 3000 && code <= 4999) ? code : 1000
-    try {
-      ws.close(replyCode, reason)
-    } catch {
-      // Already closed.
-    }
-  }
-
-  override webSocketError(ws: WebSocket) {
-    this.syncStates.delete(ws)
-  }
-
-  private persist() {
-    return this.ctx.storage.put(DOC_KEY, Automerge.save(this.doc))
-  }
-
-  private sendSyncMessage(ws: WebSocket) {
-    const [syncState, message] = Automerge.generateSyncMessage(
-      this.doc,
-      this.getSyncState(ws),
-    )
-    this.setSyncState(ws, syncState)
-    if (message) ws.send(message)
-  }
-
-  /**
-   * In-memory states are lost when the object hibernates. Fall back to the
-   * encoded copy on the socket, which keeps only the heads both sides share
-   * and is safe to resume from.
-   */
-  private getSyncState(ws: WebSocket) {
-    const cached = this.syncStates.get(ws)
-    if (cached) return cached
-
-    const attachment = this.getAttachment(ws)
-    const restored = attachment?.syncState
-      ? Automerge.decodeSyncState(attachment.syncState)
-      : Automerge.initSyncState()
-    this.syncStates.set(ws, restored)
-    return restored
-  }
-
-  private setSyncState(
-    ws: WebSocket,
-    syncState: Automerge.SyncState,
-    attachment = this.getAttachment(ws),
+  private async handleOperation(
+    connection: Connection<ConnectionState>,
+    { opId, op }: ClientMessage,
   ) {
-    this.syncStates.set(ws, syncState)
-    ws.serializeAttachment({
-      viewerId: attachment?.viewerId ?? null,
-      syncState: Automerge.encodeSyncState(syncState),
-    } satisfies SocketAttachment)
+    const reject = (reason: string) =>
+      send(connection, { type: 'reject', opId, reason })
+
+    const viewerId = connection.state?.viewerId
+    if (!viewerId) return reject('Sign in to make changes')
+    if (!this.board) return reject('Board not found')
+
+    const result = await commitOperation(
+      db,
+      this.board,
+      op,
+      viewerId,
+      Date.now(),
+    )
+    if (!result.ok) return reject(result.reason)
+
+    if (result.stateChanged) {
+      this.broadcast(encode({ type: 'state', state: this.board.state }))
+    }
+    if (op.kind === 'setVote' || op.kind === 'deleteDecision') {
+      for (const own of this.getConnections(viewerId)) {
+        send(own, { type: 'myVotes', myVotes: result.myVotes })
+      }
+    }
+    send(connection, { type: 'ack', opId })
   }
 
-  private getAttachment(ws: WebSocket) {
-    return ws.deserializeAttachment() as SocketAttachment | null
+  private serialize<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(task)
+    this.queue = run.catch(() => undefined)
+    return run
   }
+}
+
+function encode(message: ServerMessage) {
+  return JSON.stringify(message)
+}
+
+function send(connection: Connection, message: ServerMessage) {
+  connection.send(encode(message))
 }

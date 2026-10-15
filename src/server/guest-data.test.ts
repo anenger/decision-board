@@ -1,36 +1,17 @@
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { createClient } from '@libsql/client'
-import { drizzle } from 'drizzle-orm/libsql'
 import { eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { moveGuestData } from './guest-data'
+import type { TestDb } from '@/db/test-db'
 import * as schema from '@/db/schema'
+import { createTestDb } from '@/db/test-db'
 
 const { boards, decisions, options, user, votes } = schema
 
-async function createDb() {
-  const dir = mkdtempSync(join(tmpdir(), 'decision-board-'))
-  const client = createClient({ url: `file:${join(dir, 'test.db')}` })
-  await client.execute('PRAGMA foreign_keys = ON')
-
-  // Build the schema from the real migrations so the test covers what D1 runs.
-  for (const file of readdirSync('drizzle').filter((f) => f.endsWith('.sql'))) {
-    const sql = readFileSync(join('drizzle', file), 'utf8')
-    for (const statement of sql.split('--> statement-breakpoint')) {
-      if (statement.trim()) await client.execute(statement)
-    }
-  }
-
-  return drizzle(client, { schema })
-}
-
 describe('moveGuestData', () => {
-  let db: Awaited<ReturnType<typeof createDb>>
+  let db: TestDb
 
   beforeEach(async () => {
-    db = await createDb()
+    db = await createTestDb()
 
     await db.insert(user).values(
       ['guest', 'account', 'other'].map((id) => ({
