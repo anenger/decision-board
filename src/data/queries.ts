@@ -1,78 +1,134 @@
-import { convexQuery, useConvexMutation } from '@convex-dev/react-query'
-import { useMutation } from '@tanstack/react-query'
-import { api } from 'convex/_generated/api'
-import type { Id } from '../../convex/_generated/dataModel'
+import {
+  queryOptions,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query'
+import type { BoardDetails } from '@/lib/board'
+import { applyVote } from '@/lib/board'
+import {
+  addOption,
+  createBoard,
+  createDecision,
+  deleteDecision,
+  getBoard,
+  getSessionInfo,
+  listMyBoards,
+  renameDecision,
+  vote,
+} from '@/server/boards'
+
+export const sessionQuery = queryOptions({
+  queryKey: ['session'],
+  queryFn: () => getSessionInfo(),
+})
 
 export const boardQueries = {
-  listMine: (voterId: string) => convexQuery(api.boards.listMine, { voterId }),
-  get: (boardId: Id<'boards'>) => convexQuery(api.boards.get, { boardId }),
+  mine: () =>
+    queryOptions({
+      queryKey: ['boards', 'mine'],
+      queryFn: () => listMyBoards(),
+    }),
+  // Polling stands in for live updates until boards sync over WebSockets.
+  detail: (boardId: string) =>
+    queryOptions({
+      queryKey: ['boards', 'detail', boardId],
+      queryFn: () => getBoard({ data: { boardId } }),
+      refetchInterval: 5_000,
+    }),
+}
+
+/**
+ * A visitor's first write creates their guest account, so every mutation
+ * refreshes the session along with the data it changed.
+ */
+function useBoardMutation<TVariables>(
+  boardId: string,
+  mutationFn: (variables: TVariables) => Promise<unknown>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries(boardQueries.detail(boardId)),
+        queryClient.invalidateQueries(sessionQuery),
+      ]),
+  })
 }
 
 export function useCreateBoardMutation() {
-  const createBoard = useConvexMutation(api.boards.create)
-  return useMutation({ mutationFn: createBoard })
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { name: string }) => createBoard({ data }),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries(boardQueries.mine()),
+        queryClient.invalidateQueries(sessionQuery),
+      ]),
+  })
 }
 
-export const decisionQueries = {
-  listByBoard: (boardId: Id<'boards'>, voterId: string) =>
-    convexQuery(api.decisions.listByBoard, { boardId, voterId }),
-}
-
-export function useCreateDecisionMutation() {
-  const addDecision = useConvexMutation(api.decisions.addDecision)
-  return useMutation({ mutationFn: addDecision })
-}
-
-export function useDeleteDecisionMutation() {
-  const removeDecision = useConvexMutation(api.decisions.removeDecision)
-  return useMutation({ mutationFn: removeDecision })
-}
-
-export function useUpdateDecisionMutation() {
-  const updateDecision = useConvexMutation(api.decisions.updateDecision)
-  return useMutation({ mutationFn: updateDecision })
-}
-
-export function useAddOptionMutation() {
-  const addOption = useConvexMutation(api.decisions.addOption)
-  return useMutation({ mutationFn: addOption })
-}
-
-export function useRemoveOptionMutation() {
-  const removeOption = useConvexMutation(api.decisions.removeOption)
-  return useMutation({ mutationFn: removeOption })
-}
-
-export function useVoteMutation() {
-  const mutationFn = useConvexMutation(api.decisions.vote).withOptimisticUpdate(
-    (localStore, args) => {
-      const { boardId, decisionId, optionId, voterId: localVoterId } = args
-      const currentValue = localStore.getQuery(api.decisions.listByBoard, {
-        boardId,
-        voterId: localVoterId,
-      })
-      if (currentValue !== undefined) {
-        localStore.setQuery(
-          api.decisions.listByBoard,
-          { boardId, voterId: localVoterId },
-          currentValue.map((decision) => {
-            if (decision._id !== decisionId) return decision
-            return {
-              ...decision,
-              options: decision.options.map((option) => {
-                if (option._id !== optionId) return option
-                return {
-                  ...option,
-                  isSelected: true,
-                  votes: option.votes,
-                }
-              }),
-            }
-          }),
-        )
-      }
-    },
+export function useCreateDecisionMutation(boardId: string) {
+  return useBoardMutation(
+    boardId,
+    (data: { title: string; options: Array<string> }) =>
+      createDecision({ data: { boardId, ...data } }),
   )
+}
 
-  return useMutation({ mutationFn })
+export function useRenameDecisionMutation(boardId: string) {
+  return useBoardMutation(
+    boardId,
+    (data: { decisionId: string; title: string }) => renameDecision({ data }),
+  )
+}
+
+export function useDeleteDecisionMutation(boardId: string) {
+  return useBoardMutation(boardId, (data: { decisionId: string }) =>
+    deleteDecision({ data }),
+  )
+}
+
+export function useAddOptionMutation(boardId: string) {
+  return useBoardMutation(
+    boardId,
+    (data: { decisionId: string; text: string }) => addOption({ data }),
+  )
+}
+
+export function useVoteMutation(boardId: string) {
+  const queryClient = useQueryClient()
+  const { queryKey } = boardQueries.detail(boardId)
+
+  return useMutation({
+    mutationFn: (data: { decisionId: string; optionId: string }) =>
+      vote({ data }),
+    onMutate: async ({ decisionId, optionId }) => {
+      await queryClient.cancelQueries({ queryKey })
+      const previous = queryClient.getQueryData<BoardDetails | null>(queryKey)
+
+      queryClient.setQueryData<BoardDetails | null>(queryKey, (current) =>
+        current
+          ? {
+              ...current,
+              decisions: current.decisions.map((decision) =>
+                decision.id === decisionId
+                  ? applyVote(decision, optionId)
+                  : decision,
+              ),
+            }
+          : current,
+      )
+
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      queryClient.setQueryData(queryKey, context?.previous)
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey }),
+        queryClient.invalidateQueries(sessionQuery),
+      ]),
+  })
 }

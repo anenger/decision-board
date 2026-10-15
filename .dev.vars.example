@@ -1,0 +1,9 @@
+# Copy to .dev.vars for local development. Set production values with `wrangler secret put`.
+BETTER_AUTH_SECRET=replace-with-output-of-openssl-rand-base64-32
+BETTER_AUTH_URL=http://localhost:3000
+
+# Optional: enables "Sign in with GitHub". Create an OAuth app at
+# https://github.com/settings/developers with callback URL
+# http://localhost:3000/api/auth/callback/github
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=

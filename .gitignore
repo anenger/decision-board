@@ -10,3 +10,7 @@ count.txt
 .wrangler
 .output
 .vinxi
+
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

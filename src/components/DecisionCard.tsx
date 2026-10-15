@@ -2,38 +2,29 @@ import { memo, useMemo, useRef, useState } from 'react'
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react'
 import type { KeyboardEvent, ReactNode } from 'react'
 
-import type { Doc, Id } from '../../convex/_generated/dataModel'
-
-type OptionWithVotes = Doc<'options'> & {
-  votes: number
-  isSelected: boolean
-}
-
-type DecisionWithOptions = Doc<'decisions'> & {
-  options: Array<OptionWithVotes>
-}
+import type { DecisionView, OptionView } from '@/lib/board'
 
 type DecisionCardProps = {
-  decision: DecisionWithOptions
-  onVote: (optionId: Id<'options'>) => void
+  decision: DecisionView
+  onVote: (optionId: string) => void
   onDelete: () => void
   onRename: (title: string) => void
   onAddOption: (text: string) => void
 }
 
 type DecisionOptionRowProps = {
-  option: OptionWithVotes
+  option: OptionView
   fillWidth: string
-  onVote: (optionId: Id<'options'>) => void
+  onVote: (optionId: string) => void
 }
 
 type VoteMetrics = {
   totalVotes: number
   totalOptions: number
-  rows: Array<{ option: OptionWithVotes; fillWidth: string }>
+  rows: Array<{ option: OptionView; fillWidth: string }>
 }
 
-function calculateVoteMetrics(options: Array<OptionWithVotes>): VoteMetrics {
+function calculateVoteMetrics(options: Array<OptionView>): VoteMetrics {
   const totalVotes = options.reduce((sum, option) => sum + option.votes, 0)
 
   return {
@@ -88,7 +79,7 @@ const DecisionOptionRow = memo(function DecisionOptionRow({
   return (
     <button
       type="button"
-      onClick={() => onVote(option._id)}
+      onClick={() => onVote(option.id)}
       className={`focus-ring group relative w-full overflow-hidden rounded-lg border px-3 py-2.5 text-left text-[13px] transition-colors ${
         isSelected
           ? 'border-[#4f6df5]/30 bg-[#4f6df5]/4 text-[#1a1a2e]'
@@ -213,23 +204,25 @@ export default function DecisionCard({
           </p>
         </div>
 
-        <div className="flex shrink-0 gap-0.5">
-          {!isEditingTitle && (
-            <IconButton onClick={startEditTitle} label="Edit title">
-              <Pencil size={13} />
+        {decision.canEdit && (
+          <div className="flex shrink-0 gap-0.5">
+            {!isEditingTitle && (
+              <IconButton onClick={startEditTitle} label="Edit title">
+                <Pencil size={13} />
+              </IconButton>
+            )}
+            <IconButton onClick={onDelete} destructive label="Delete decision">
+              <Trash2 size={13} />
             </IconButton>
-          )}
-          <IconButton onClick={onDelete} destructive label="Delete decision">
-            <Trash2 size={13} />
-          </IconButton>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Options — always visible */}
       <div className="mt-4 space-y-2">
         {voteMetrics.rows.map(({ option, fillWidth }) => (
           <DecisionOptionRow
-            key={option._id}
+            key={option.id}
             option={option}
             fillWidth={fillWidth}
             onVote={onVote}

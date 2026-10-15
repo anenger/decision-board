@@ -10,14 +10,14 @@
     "format": "prettier",
     "check": "prettier --write . && eslint --fix",
     "preview": "vite preview",
-    "deploy": "bun run build && wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "deploy": "bun run build && wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.21.0",
-    "@convex-dev/migrations": "^0.3.1",
-    "@convex-dev/react-query": "^0.1.0",
-    "@t3-oss/env-core": "^0.13.8",
     "@tailwindcss/vite": "^4.0.6",
     "@tanstack/react-devtools": "^0.7.0",
     "@tanstack/react-query": "^5.90.18",
@@ -26,9 +26,10 @@
     "@tanstack/react-router-ssr-query": "^1.131.7",
     "@tanstack/react-start": "^1.132.0",
     "@tanstack/router-plugin": "^1.132.0",
+    "better-auth": "^1.7.10",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "convex": "^1.27.3",
+    "drizzle-orm": "^0.45.4",
     "lucide-react": "^0.561.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -39,6 +40,7 @@
     "zod": "^4.1.11"
   },
   "devDependencies": {
+    "@libsql/client": "^0.18.0",
     "@tanstack/devtools-vite": "^0.3.11",
     "@tanstack/eslint-config": "^0.3.4",
     "@testing-library/dom": "^10.4.0",
@@ -47,6 +49,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.2",
     "jsdom": "^27.0.0",
     "prettier": "^3.5.3",

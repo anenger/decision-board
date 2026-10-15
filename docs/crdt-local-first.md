@@ -1,10 +1,14 @@
-# CRDT Local-First Plan (Automerge + IndexedDB + Convex)
+# CRDT Local-First Plan (Automerge + IndexedDB + Durable Objects)
+
+> Convex has been removed. Auth and the board index live in D1; the sync API
+> below will be implemented as one Durable Object per board instead of Convex
+> tables and mutations.
 
 ## Goals
 
 - Local-first UX: all changes apply instantly and work offline.
 - CRDT-based merge: no hard conflicts, deterministic resolution.
-- Convex used only for syncing change logs and snapshots.
+- The server is used only for syncing change logs and snapshots.
 
 ## 1) Data Model + CRDT Shape
 

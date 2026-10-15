@@ -2,41 +2,30 @@ import { createFileRoute, notFound, useNavigate } from '@tanstack/react-router'
 import { useCallback, useMemo, useState } from 'react'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { ArrowLeft, Check, LayoutGrid, Plus, Share2 } from 'lucide-react'
-import type { Id } from '../../convex/_generated/dataModel'
 import DecisionCard from '@/components/DecisionCard'
 import DecisionCreateModal from '@/components/DecisionCreateModal'
-import { login } from '@/lib/session'
 import { Loader } from '@/components/Loader'
+import { AccountMenu } from '@/components/AccountMenu'
 import {
   boardQueries,
-  decisionQueries,
+  sessionQuery,
   useAddOptionMutation,
   useCreateDecisionMutation,
   useDeleteDecisionMutation,
-  useUpdateDecisionMutation,
+  useRenameDecisionMutation,
   useVoteMutation,
 } from '@/data/queries'
 
 export const Route = createFileRoute('/boards/$boardId')({
   pendingComponent: () => <Loader />,
   loader: async ({ context: { queryClient }, params: { boardId } }) => {
-    const voterId = await login()
-    const typedBoardId = boardId as Id<'boards'>
-    const board = await queryClient.ensureQueryData(
-      boardQueries.get(typedBoardId),
-    )
+    const [details] = await Promise.all([
+      queryClient.ensureQueryData(boardQueries.detail(boardId)),
+      queryClient.ensureQueryData(sessionQuery),
+    ])
 
-    if (!board) {
+    if (!details) {
       throw notFound()
-    }
-
-    await queryClient.ensureQueryData(
-      decisionQueries.listByBoard(typedBoardId, voterId),
-    )
-
-    return {
-      voterId,
-      boardId: typedBoardId,
     }
   },
   component: BoardRoute,
@@ -60,17 +49,16 @@ const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
 
 function BoardRoute() {
   const navigate = useNavigate({ from: '/boards/$boardId' })
-  const { boardId, voterId } = Route.useLoaderData()
-  const { data: board } = useSuspenseQuery(boardQueries.get(boardId))
-  const { data: decisions } = useSuspenseQuery(
-    decisionQueries.listByBoard(boardId, voterId),
-  )
+  const { boardId } = Route.useParams()
+  const { data: details } = useSuspenseQuery(boardQueries.detail(boardId))
+  const board = details?.board
+  const decisions = details?.decisions ?? []
 
-  const { mutate: addDecision } = useCreateDecisionMutation()
-  const { mutate: removeDecision } = useDeleteDecisionMutation()
-  const { mutate: updateDecision } = useUpdateDecisionMutation()
-  const { mutate: addOption } = useAddOptionMutation()
-  const { mutate: vote } = useVoteMutation()
+  const { mutate: addDecision } = useCreateDecisionMutation(boardId)
+  const { mutate: removeDecision } = useDeleteDecisionMutation(boardId)
+  const { mutate: renameDecision } = useRenameDecisionMutation(boardId)
+  const { mutate: addOption } = useAddOptionMutation(boardId)
+  const { mutate: vote } = useVoteMutation(boardId)
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [draft, setDraft] = useState<DecisionDraft>(initialDraft)
@@ -106,7 +94,6 @@ function BoardRoute() {
     const title = draft.title.trim()
 
     addDecision({
-      boardId,
       title,
       options: sanitizedDraftOptions,
     })
@@ -121,8 +108,8 @@ function BoardRoute() {
   }
 
   const handleRemoveDecision = useCallback(
-    (decisionId: Id<'decisions'>) => {
-      removeDecision({ id: decisionId })
+    (decisionId: string) => {
+      removeDecision({ decisionId })
     },
     [removeDecision],
   )
@@ -145,7 +132,7 @@ function BoardRoute() {
   }
 
   const boardCreatedLabel = fullDateFormatter.format(
-    new Date(board._creationTime),
+    new Date(board.createdAt),
   )
 
   return (
@@ -176,6 +163,7 @@ function BoardRoute() {
           </div>
 
           <div className="flex items-center gap-2">
+            <AccountMenu />
             <button
               type="button"
               onClick={handleShareBoard}
@@ -251,29 +239,20 @@ function BoardRoute() {
             <div className="grid gap-4 lg:grid-cols-2">
               {decisions.map((decision, index) => (
                 <div
-                  key={decision._id}
+                  key={decision.id}
                   className={`anim-fade-rise stagger-${Math.min(index + 1, 8)}`}
                 >
                   <DecisionCard
                     decision={decision}
-                    onVote={(optionId: Id<'options'>) => {
-                      vote({
-                        boardId,
-                        optionId,
-                        voterId,
-                        decisionId: decision._id,
-                      })
+                    onVote={(optionId: string) => {
+                      vote({ decisionId: decision.id, optionId })
                     }}
-                    onDelete={() => handleRemoveDecision(decision._id)}
+                    onDelete={() => handleRemoveDecision(decision.id)}
                     onRename={(title: string) =>
-                      updateDecision({ id: decision._id, title })
+                      renameDecision({ decisionId: decision.id, title })
                     }
                     onAddOption={(text: string) =>
-                      addOption({
-                        decisionId: decision._id,
-                        text,
-                        position: decision.options.length,
-                      })
+                      addOption({ decisionId: decision.id, text })
                     }
                   />
                 </div>

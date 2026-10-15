@@ -3,9 +3,13 @@ import { useSuspenseQuery } from '@tanstack/react-query'
 import { ArrowRight, CircleDot, LayoutGrid, Plus } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { login } from '@/lib/session'
 import { Loader } from '@/components/Loader'
-import { boardQueries, useCreateBoardMutation } from '@/data/queries'
+import { AccountMenu } from '@/components/AccountMenu'
+import {
+  boardQueries,
+  sessionQuery,
+  useCreateBoardMutation,
+} from '@/data/queries'
 
 const relativeFormatter = new Intl.RelativeTimeFormat('en', {
   numeric: 'auto',
@@ -34,18 +38,17 @@ function formatRelativeDate(timestamp: number) {
 
 export const Route = createFileRoute('/')({
   pendingComponent: () => <Loader />,
-  loader: async ({ context: { queryClient } }) => {
-    const voterId = await login()
-    await queryClient.ensureQueryData(boardQueries.listMine(voterId))
-    return { voterId }
-  },
+  loader: ({ context: { queryClient } }) =>
+    Promise.all([
+      queryClient.ensureQueryData(boardQueries.mine()),
+      queryClient.ensureQueryData(sessionQuery),
+    ]),
   component: BoardsHome,
 })
 
 function BoardsHome() {
   const navigate = useNavigate({ from: '/' })
-  const { voterId } = Route.useLoaderData()
-  const { data: boards } = useSuspenseQuery(boardQueries.listMine(voterId))
+  const { data: boards } = useSuspenseQuery(boardQueries.mine())
   const { mutateAsync: createBoard, isPending } = useCreateBoardMutation()
 
   const [boardName, setBoardName] = useState('')
@@ -56,10 +59,7 @@ function BoardsHome() {
   const handleCreateBoard = async () => {
     if (!canCreate) return
 
-    const boardId = await createBoard({
-      voterId,
-      name: boardName.trim(),
-    })
+    const { id: boardId } = await createBoard({ name: boardName.trim() })
 
     setBoardName('')
     navigate({ to: '/boards/$boardId', params: { boardId } })
@@ -86,10 +86,11 @@ function BoardsHome() {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="hidden text-[13px] text-[#6b6f80] sm:inline">
               {boards.length} board{boards.length === 1 ? '' : 's'}
             </span>
+            <AccountMenu />
           </div>
         </div>
       </header>
@@ -167,9 +168,9 @@ function BoardsHome() {
               {/* Board rows */}
               {boards.map((board, index) => (
                 <Link
-                  key={board._id}
+                  key={board.id}
                   to="/boards/$boardId"
-                  params={{ boardId: board._id }}
+                  params={{ boardId: board.id }}
                   className={`hover-lift group grid grid-cols-[1fr_auto_auto] items-center gap-4 px-5 py-3.5 ${
                     index < boards.length - 1 ? 'border-b border-[#f0f1f4]' : ''
                   }`}
@@ -182,7 +183,7 @@ function BoardsHome() {
                   </div>
 
                   <span className="hidden w-28 text-right font-['IBM_Plex_Mono',monospace] text-[12px] text-[#9a9daa] sm:block">
-                    {formatRelativeDate(board._creationTime)}
+                    {formatRelativeDate(board.createdAt)}
                   </span>
 
                   <span className="flex w-16 items-center justify-end gap-1 text-[13px] text-[#9a9daa] transition-colors group-hover:text-[#4f6df5]">
