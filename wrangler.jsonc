@@ -10,8 +10,7 @@
 		{
 			"binding": "DB",
 			"database_name": "decision-board",
-			// Replace with the id printed by `wrangler d1 create decision-board` before deploying.
-			"database_id": "00000000-0000-0000-0000-000000000000",
+			"database_id": "850a44ca-4129-45c3-9f06-4e19a6e085a9",
 			"migrations_dir": "drizzle"
 		}
 	]

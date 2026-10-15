@@ -1,5 +1,7 @@
 # Decision Board
 
+**Live:** <https://decision-board.andrew-enger48.workers.dev>
+
 Collaborative boards for making group decisions. Create a board, share the link, and vote on options together. No sign-up is needed to start, and you can sign in with GitHub to keep your boards.
 
 ## Run locally
