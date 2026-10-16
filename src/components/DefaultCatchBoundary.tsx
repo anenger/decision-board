@@ -1,52 +1,38 @@
-import {
-  ErrorComponent,
-  Link,
-  rootRouteId,
-  useMatch,
-  useRouter,
-} from '@tanstack/react-router'
+import { Link, useRouter } from '@tanstack/react-router'
+import { Mascot } from './Mascot'
 import type { ErrorComponentProps } from '@tanstack/react-router'
 
 export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
   const router = useRouter()
-  const isRoot = useMatch({
-    strict: false,
-    select: (state) => state.id === rootRouteId,
-  })
-
   console.error(error)
 
   return (
-    <div className="min-w-0 flex-1 p-4 flex flex-col items-center justify-center gap-6">
-      <ErrorComponent error={error} />
-      <div className="flex gap-2 items-center flex-wrap">
+    <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
+      <Mascot
+        mood="surprised"
+        size={110}
+        color="#ffd0e2"
+        className="anim-float"
+      />
+      <h1 className="mt-6 text-3xl font-semibold sm:text-4xl">
+        Something went wobbly
+      </h1>
+      <p className="mt-2 max-w-sm text-ink-soft">
+        {error instanceof Error && error.message
+          ? error.message
+          : 'An unexpected error happened.'}
+      </p>
+      <div className="mt-7 flex flex-wrap justify-center gap-3">
         <button
-          onClick={() => {
-            router.invalidate()
-          }}
-          className={`px-2 py-1 bg-gray-600 dark:bg-gray-700 rounded-sm text-white uppercase font-extrabold`}
+          type="button"
+          onClick={() => router.invalidate()}
+          className="btn-chunky focus-ring bg-tomato px-6 text-white"
         >
-          Try Again
+          Try again
         </button>
-        {isRoot ? (
-          <Link
-            to="/"
-            className={`px-2 py-1 bg-gray-600 dark:bg-gray-700 rounded-sm text-white uppercase font-extrabold`}
-          >
-            Home
-          </Link>
-        ) : (
-          <Link
-            to="/"
-            className={`px-2 py-1 bg-gray-600 dark:bg-gray-700 rounded-sm text-white uppercase font-extrabold`}
-            onClick={(e) => {
-              e.preventDefault()
-              window.history.back()
-            }}
-          >
-            Go Back
-          </Link>
-        )}
+        <Link to="/" className="btn-chunky focus-ring bg-white px-6">
+          Home
+        </Link>
       </div>
     </div>
   )

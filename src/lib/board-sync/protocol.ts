@@ -61,15 +61,52 @@ export type ClientMessage = {
   op: Operation
 }
 
+/** Someone looking at the board right now. One entry per person, not per tab. */
+export type Person = {
+  /** User id, or a per-connection id for visitors without a session. */
+  key: string
+  name: string
+  image: string | null
+  emoji: string
+  color: string
+  isGuest: boolean
+}
+
+export type ActivityKind =
+  | 'createDecision'
+  | 'renameDecision'
+  | 'deleteDecision'
+  | 'addOption'
+  | 'setVote'
+
 export type ServerMessage =
   /** Sent on connect. `viewerId` is who the server thinks this socket is. */
-  | { type: 'snapshot'; viewerId: string | null; snapshot: BoardSnapshot }
+  | {
+      type: 'snapshot'
+      viewerId: string | null
+      snapshot: BoardSnapshot
+      /** This connection's own presence key. */
+      you: string
+      people: Array<Person>
+    }
   /** Broadcast to everyone after a change. */
   | { type: 'state'; state: BoardState }
   /** Sent to a user's own connections when their votes change. */
   | { type: 'myVotes'; myVotes: VoteMap }
   | { type: 'ack'; opId: string }
   | { type: 'reject'; opId: string; reason: string }
+  /** Broadcast when someone joins or leaves. */
+  | { type: 'presence'; people: Array<Person> }
+  /**
+   * Who just changed what, so other viewers can see it happen. Never says
+   * which option someone voted for.
+   */
+  | {
+      type: 'activity'
+      personKey: string
+      decisionId: string
+      kind: ActivityKind
+    }
 
 export const BOARD_PARTY = 'board-room'
 

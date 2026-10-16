@@ -1,15 +1,18 @@
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import { ArrowRight, CircleDot, LayoutGrid, Plus } from 'lucide-react'
+import { ArrowRight, Sparkles } from 'lucide-react'
 import { useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import type { FormEvent } from 'react'
 import { Loader } from '@/components/Loader'
 import { AccountMenu } from '@/components/AccountMenu'
+import { Mascot } from '@/components/Mascot'
 import {
   boardQueries,
   sessionQuery,
   useCreateBoardMutation,
 } from '@/data/queries'
+import { hashString } from '@/lib/board-sync/persona'
+import { useHydrated } from '@/lib/use-hydrated'
 
 const relativeFormatter = new Intl.RelativeTimeFormat('en', {
   numeric: 'auto',
@@ -22,10 +25,7 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 })
 
 function formatRelativeDate(timestamp: number) {
-  const now = Date.now()
-  const diff = now - timestamp
-  const seconds = Math.floor(diff / 1000)
-  const minutes = Math.floor(seconds / 60)
+  const minutes = Math.floor((Date.now() - timestamp) / 60_000)
   const hours = Math.floor(minutes / 60)
   const days = Math.floor(hours / 24)
 
@@ -33,8 +33,20 @@ function formatRelativeDate(timestamp: number) {
   if (days > 0) return relativeFormatter.format(-days, 'day')
   if (hours > 0) return relativeFormatter.format(-hours, 'hour')
   if (minutes > 0) return relativeFormatter.format(-minutes, 'minute')
-  return 'Just now'
+  return 'just now'
 }
+
+const TILE_COLORS = [
+  'bg-bubblegum',
+  'bg-tangerine',
+  'bg-butter',
+  'bg-mint',
+  'bg-sky',
+  'bg-lilac',
+]
+const TILE_EMOJI = ['🍕', '🎉', '🏕️', '🎬', '🎨', '🌮', '🎲', '🚀', '🌈', '🍩']
+
+const IDEAS = ['Friday lunch', 'Team offsite', 'Movie night', 'Trip to Lisbon']
 
 export const Route = createFileRoute('/')({
   pendingComponent: () => <Loader />,
@@ -50,151 +62,153 @@ function BoardsHome() {
   const navigate = useNavigate({ from: '/' })
   const { data: boards } = useSuspenseQuery(boardQueries.mine())
   const { mutateAsync: createBoard, isPending } = useCreateBoardMutation()
-
   const [boardName, setBoardName] = useState('')
-  const boardNameRef = useRef<HTMLInputElement | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const hydrated = useHydrated()
 
   const canCreate = boardName.trim().length > 0 && !isPending
 
-  const handleCreateBoard = async () => {
+  const handleCreate = async (event: FormEvent) => {
+    event.preventDefault()
     if (!canCreate) return
-
     const { id: boardId } = await createBoard({ name: boardName.trim() })
-
     setBoardName('')
     navigate({ to: '/boards/$boardId', params: { boardId } })
   }
 
-  const handleBoardNameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Enter') return
-
-    event.preventDefault()
-    void handleCreateBoard()
-  }
-
   return (
-    <div className="min-h-screen bg-[#f7f8fa]">
-      {/* ── Top bar ──────────────────────────────────────── */}
-      <header className="border-b border-[#e2e4ea] bg-white">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#4f6df5]">
-              <LayoutGrid size={14} className="text-white" />
-            </div>
-            <span className="text-[15px] font-semibold tracking-[-0.01em] text-[#1a1a2e]">
-              Decision Board
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="hidden text-[13px] text-[#6b6f80] sm:inline">
-              {boards.length} board{boards.length === 1 ? '' : 's'}
-            </span>
-            <AccountMenu />
-          </div>
-        </div>
+    <div className="min-h-dvh pb-16">
+      <header className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 pt-[env(safe-area-inset-top)] sm:px-5">
+        <Link
+          to="/"
+          className="focus-ring group flex min-h-11 items-center gap-2 rounded-full"
+        >
+          <Mascot
+            size={34}
+            className="transition-transform duration-300 group-hover:-rotate-12"
+          />
+          <span className="font-display text-xl font-semibold tracking-tight">
+            decision board
+          </span>
+        </Link>
+        <AccountMenu />
       </header>
 
-      {/* ── Main content ─────────────────────────────────── */}
-      <main className="mx-auto max-w-5xl px-5 py-8">
-        {/* Page heading + create row */}
-        <div className="anim-fade-rise flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#1a1a2e]">
-              Your boards
-            </h1>
-            <p className="mt-1 text-[13px] text-[#6b6f80]">
-              Create and manage collaborative decision boards
-            </p>
-          </div>
+      <main className="mx-auto max-w-5xl px-4 sm:px-5">
+        <section className="relative pt-8 pb-10 sm:pt-16 sm:pb-14">
+          <Mascot
+            mood="wink"
+            size={84}
+            color="#ffd0e2"
+            className="anim-float mb-5 sm:absolute sm:top-12 sm:right-4 sm:mb-0 sm:h-36 sm:w-36"
+          />
+          <h1 className="anim-rise max-w-2xl text-[2.6rem] leading-[1.02] font-semibold sm:text-7xl">
+            What are we{' '}
+            <span className="relative inline-block">
+              <span className="relative z-10">deciding</span>
+              <span
+                aria-hidden="true"
+                className="absolute inset-x-0 bottom-1 -z-0 h-3 -rotate-1 rounded-full bg-butter sm:h-5"
+              />
+            </span>
+            ?
+          </h1>
+          <p className="anim-rise mt-4 max-w-md text-lg text-ink-soft [animation-delay:80ms]">
+            Make a board, share the link, and let everyone vote together, live.
+            No sign-up needed.
+          </p>
 
-          <div className="flex gap-2">
+          <form
+            onSubmit={handleCreate}
+            className="anim-rise mt-7 flex max-w-xl flex-col gap-3 [animation-delay:140ms] sm:flex-row"
+          >
             <input
-              ref={boardNameRef}
-              type="text"
-              placeholder="Board name…"
+              ref={inputRef}
               value={boardName}
+              maxLength={100}
               onChange={(event) => setBoardName(event.target.value)}
-              onKeyDown={handleBoardNameKeyDown}
-              className="focus-ring h-9 w-full rounded-lg border border-[#e2e4ea] bg-white px-3 text-[13px] text-[#1a1a2e] placeholder:text-[#a0a3b1] sm:w-56"
+              placeholder="Name your board…"
+              aria-label="Board name"
+              className="focus-ring min-h-14 min-w-0 flex-1 rounded-full border-2 border-ink bg-white px-5 font-display text-lg placeholder:text-ink-faint"
             />
             <button
-              type="button"
-              onClick={handleCreateBoard}
+              type="submit"
               disabled={!canCreate}
-              className={`focus-ring inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3.5 text-[13px] font-medium transition-colors ${
-                canCreate
-                  ? 'bg-[#4f6df5] text-white hover:bg-[#4059d9]'
-                  : 'cursor-not-allowed bg-[#e2e4ea] text-[#a0a3b1]'
-              }`}
+              className="btn-chunky focus-ring min-h-14 bg-tomato px-7 text-lg text-white"
             >
-              <Plus size={14} />
-              <span className="hidden sm:inline">New board</span>
+              <Sparkles size={20} />
+              {isPending ? 'Making it…' : 'Make a board'}
             </button>
-          </div>
-        </div>
-
-        {/* Board list */}
-        <div className="mt-6">
-          {boards.length === 0 ? (
-            <div className="anim-fade-rise rounded-xl border border-dashed border-[#d0d3db] bg-white px-6 py-16 text-center">
-              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[#f0f1f4]">
-                <LayoutGrid size={18} className="text-[#6b6f80]" />
-              </div>
-              <h2 className="mt-4 text-[15px] font-semibold text-[#1a1a2e]">
-                No boards yet
-              </h2>
-              <p className="mt-1.5 text-[13px] text-[#6b6f80]">
-                Create your first board to start making decisions together.
-              </p>
+          </form>
+          <div className="anim-rise mt-3 flex flex-wrap gap-2 [animation-delay:200ms]">
+            {IDEAS.map((idea) => (
               <button
+                key={idea}
                 type="button"
-                onClick={() => boardNameRef.current?.focus()}
-                className="focus-ring mt-5 inline-flex items-center gap-2 rounded-lg bg-[#4f6df5] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-[#4059d9]"
+                onClick={() => {
+                  setBoardName(idea)
+                  inputRef.current?.focus()
+                }}
+                className="focus-ring min-h-10 rounded-full border-2 border-dashed border-ink/30 px-3 text-sm font-semibold text-ink-soft transition hover:-rotate-2 hover:border-ink hover:bg-white hover:text-ink"
               >
-                Create a board
-                <ArrowRight size={14} />
+                {idea}
               </button>
+            ))}
+          </div>
+        </section>
+
+        <section aria-labelledby="your-boards">
+          <h2 id="your-boards" className="text-2xl font-semibold">
+            Your boards
+          </h2>
+
+          {boards.length === 0 ? (
+            <div className="anim-pop sticker mt-4 flex items-center gap-4 bg-white p-5">
+              <Mascot mood="sleepy" size={56} className="shrink-0" />
+              <p className="text-ink-soft">
+                Nothing here yet. Name a board above and it'll show up here. ☝️
+              </p>
             </div>
           ) : (
-            <div className="anim-fade-rise overflow-hidden rounded-xl border border-[#e2e4ea] bg-white">
-              {/* Table header */}
-              <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-[#e2e4ea] bg-[#fafbfc] px-5 py-2.5 text-[11px] font-medium tracking-[0.04em] uppercase text-[#6b6f80]">
-                <span>Name</span>
-                <span className="hidden w-28 text-right sm:block">Created</span>
-                <span className="w-16" />
-              </div>
-
-              {/* Board rows */}
-              {boards.map((board, index) => (
-                <Link
-                  key={board.id}
-                  to="/boards/$boardId"
-                  params={{ boardId: board.id }}
-                  className={`hover-lift group grid grid-cols-[1fr_auto_auto] items-center gap-4 px-5 py-3.5 ${
-                    index < boards.length - 1 ? 'border-b border-[#f0f1f4]' : ''
-                  }`}
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <CircleDot size={15} className="shrink-0 text-[#4f6df5]" />
-                    <span className="truncate text-[14px] font-medium text-[#1a1a2e]">
-                      {board.name}
-                    </span>
-                  </div>
-
-                  <span className="hidden w-28 text-right font-['IBM_Plex_Mono',monospace] text-[12px] text-[#9a9daa] sm:block">
-                    {formatRelativeDate(board.createdAt)}
-                  </span>
-
-                  <span className="flex w-16 items-center justify-end gap-1 text-[13px] text-[#9a9daa] transition-colors group-hover:text-[#4f6df5]">
-                    Open
-                    <ArrowRight size={13} />
-                  </span>
-                </Link>
-              ))}
-            </div>
+            <ul className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {boards.map((board, index) => {
+                const hash = hashString(board.id)
+                return (
+                  <li
+                    key={board.id}
+                    className="anim-pop min-w-0"
+                    style={{ animationDelay: `${Math.min(index, 8) * 50}ms` }}
+                  >
+                    <Link
+                      to="/boards/$boardId"
+                      params={{ boardId: board.id }}
+                      className={`sticker lift focus-ring group flex h-full items-center gap-4 p-4 ${
+                        TILE_COLORS[hash % TILE_COLORS.length]
+                      }`}
+                    >
+                      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 border-ink bg-white text-3xl transition-transform duration-300 group-hover:rotate-12">
+                        {TILE_EMOJI[(hash >>> 4) % TILE_EMOJI.length]}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-display text-lg leading-tight font-semibold wrap-anywhere">
+                          {board.name}
+                        </span>
+                        <span className="mt-0.5 block min-h-5 text-sm font-semibold text-ink-soft">
+                          {/* Relative to the viewer's clock, so only after hydration. */}
+                          {hydrated && formatRelativeDate(board.createdAt)}
+                        </span>
+                      </span>
+                      <ArrowRight
+                        size={20}
+                        className="shrink-0 transition-transform group-hover:translate-x-1"
+                      />
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
           )}
-        </div>
+        </section>
       </main>
     </div>
   )

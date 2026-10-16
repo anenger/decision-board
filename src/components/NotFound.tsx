@@ -1,25 +1,22 @@
 import { Link } from '@tanstack/react-router'
+import { Mascot } from './Mascot'
 
-export function NotFound({ children }: { children?: any }) {
+export function NotFound() {
   return (
-    <div className="space-y-2 p-2">
-      <div className="text-gray-600 dark:text-gray-400">
-        {children || <p>The page you are looking for does not exist.</p>}
-      </div>
-      <p className="flex items-center gap-2 flex-wrap">
-        <button
-          onClick={() => window.history.back()}
-          className="bg-emerald-500 text-white px-2 py-1 rounded-sm uppercase font-black text-sm"
-        >
-          Go back
-        </button>
-        <Link
-          to="/"
-          className="bg-cyan-600 text-white px-2 py-1 rounded-sm uppercase font-black text-sm"
-        >
-          Start Over
-        </Link>
+    <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
+      <Mascot mood="surprised" size={110} className="anim-float" />
+      <h1 className="mt-6 text-3xl font-semibold sm:text-4xl">
+        This page wandered off
+      </h1>
+      <p className="mt-2 max-w-sm text-ink-soft">
+        The board might have been deleted, or the link has a typo.
       </p>
+      <Link
+        to="/"
+        className="btn-chunky focus-ring mt-7 bg-tomato px-6 text-white"
+      >
+        Take me home
+      </Link>
     </div>
   )
 }

@@ -42,6 +42,12 @@ Boards update live for everyone viewing them and keep working through dropped co
 
 D1 stays the source of truth, so server rendering and the boards list read it directly.
 
+## Presence
+
+Everyone viewing a board appears as a sticker in the header. Signed-in people show their GitHub name and avatar. Guests and visitors get a made-up animal ("Sleepy Otter 🦦"), picked from a per-browser cookie so it stays the same before and after their first vote creates a guest account. The room tracks people per connection, survives hibernation, and lists each person once however many tabs they have open (`src/server/presence.ts`).
+
+When someone else changes a question, its card wiggles and briefly shows who did what ("Bouncy Fox voted!"). It never says which option they picked.
+
 ## Architecture
 
 - **TanStack Start** (React 19, file-based routing, server functions) running on **Cloudflare Workers**.

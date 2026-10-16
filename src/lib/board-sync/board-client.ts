@@ -3,9 +3,11 @@ import { del, get, set } from 'idb-keyval'
 import { BOARD_PARTY } from './protocol'
 import { applyOperation, checkOperation } from './reducer'
 import type {
+  ActivityKind,
   BoardSnapshot,
   ClientMessage,
   Operation,
+  Person,
   ServerMessage,
 } from './protocol'
 
@@ -18,7 +20,23 @@ export type BoardSyncView = {
   status: ConnectionStatus
   pendingCount: number
   error: string | null
+  /** Everyone viewing the board, including you. */
+  people: Array<Person>
+  /** Your own presence key, once connected. */
+  you: string | null
+  /** Changes other people made in the last few seconds. */
+  activity: Array<Activity>
 }
+
+export type Activity = {
+  id: string
+  person: Person
+  decisionId: string
+  kind: ActivityKind
+}
+
+/** How long someone else's change stays highlighted. */
+const ACTIVITY_MS = 2_800
 
 type PendingOperation = { opId: string; op: Operation }
 
@@ -51,6 +69,9 @@ export class BoardSyncClient {
   private viewerId: string | null
   private status: ConnectionStatus = 'connecting'
   private error: string | null = null
+  private people: Array<Person> = []
+  private you: string | null = null
+  private activity: Array<Activity> = []
   private socket: PartySocket | null = null
   /** Who the current socket is signed in as; undefined until its snapshot. */
   private socketViewerId: string | null | undefined
@@ -93,6 +114,8 @@ export class BoardSyncClient {
         socket.close()
         this.error = 'This board no longer exists'
       }
+      // Who's here is unknown until the next snapshot.
+      if (!this.isReconnecting) this.people = []
       this.update({ status: this.isReconnecting ? 'connecting' : 'offline' })
     })
 
@@ -126,6 +149,8 @@ export class BoardSyncClient {
   private receive(message: ServerMessage) {
     switch (message.type) {
       case 'snapshot':
+        this.people = message.people
+        this.you = message.you
         this.confirmed = message.snapshot
         this.socketViewerId = message.viewerId
         this.isReconnecting = false
@@ -146,8 +171,39 @@ export class BoardSyncClient {
         this.removePending(message.opId)
         this.error = message.reason
         break
+      case 'presence':
+        this.people = message.people
+        break
+      case 'activity':
+        this.recordActivity(message)
+        break
     }
     this.update({})
+  }
+
+  private recordActivity({
+    personKey,
+    decisionId,
+    kind,
+  }: Extract<ServerMessage, { type: 'activity' }>) {
+    const person = this.people.find((p) => p.key === personKey)
+    // Your other tabs are you, not someone else.
+    if (!person || personKey === this.you) return
+
+    const entry: Activity = {
+      id: crypto.randomUUID(),
+      person,
+      decisionId,
+      kind,
+    }
+    this.activity = [
+      ...this.activity.filter((a) => a.decisionId !== decisionId),
+      entry,
+    ]
+    setTimeout(() => {
+      this.activity = this.activity.filter((a) => a.id !== entry.id)
+      this.update({})
+    }, ACTIVITY_MS)
   }
 
   /** Sends every pending change on a freshly synced socket. */
@@ -259,6 +315,9 @@ export class BoardSyncClient {
       status: this.status,
       pendingCount: this.pending.length,
       error: this.error,
+      people: this.people,
+      you: this.you,
+      activity: this.activity,
     }
   }
 }

@@ -1,22 +1,28 @@
 import { Server } from 'partyserver'
 import { commitOperation, loadBoard, snapshotFor } from './board-store'
 import { clientMessageSchema } from './operation-schema'
+import { personFor, presenceList } from './presence'
+import { readViewerHeaders } from './viewer-headers'
 import type { Connection, ConnectionContext, WSMessage } from 'partyserver'
 import type { LoadedBoard } from './board-store'
-import type { ClientMessage, ServerMessage } from '@/lib/board-sync/protocol'
+import type {
+  ClientMessage,
+  Person,
+  ServerMessage,
+} from '@/lib/board-sync/protocol'
 import { db } from '@/db'
 import { LIMITS } from '@/lib/board-sync/protocol'
 
-/** Set by the Worker from the session cookie; any client-sent value is replaced. */
-export const VIEWER_ID_HEADER = 'x-viewer-id'
-
-type ConnectionState = { viewerId: string | null }
+type ConnectionState = {
+  viewerId: string | null
+  person: Person
+}
 
 /**
  * One instance per board, named by board id. It is the only writer for its
  * board: it checks each operation, saves it to D1, then broadcasts the new
  * state. D1 stays the source of truth, so the home page and server
- * rendering keep reading it directly.
+ * rendering keep reading it directly. It also tracks who's viewing.
  */
 export class BoardRoom extends Server<Env> {
   static override options = { hibernate: true }
@@ -33,7 +39,7 @@ export class BoardRoom extends Server<Env> {
   }
 
   override getConnectionTags(_connection: Connection, ctx: ConnectionContext) {
-    const viewerId = ctx.request.headers.get(VIEWER_ID_HEADER)
+    const viewerId = readViewerHeaders(ctx.request.headers).viewer?.id
     return viewerId ? [viewerId] : []
   }
 
@@ -41,8 +47,10 @@ export class BoardRoom extends Server<Env> {
     connection: Connection<ConnectionState>,
     ctx: ConnectionContext,
   ) {
-    const viewerId = ctx.request.headers.get(VIEWER_ID_HEADER) || null
-    connection.setState({ viewerId })
+    const { viewer, deviceSeed } = readViewerHeaders(ctx.request.headers)
+    const person = personFor(viewer, connection.id, deviceSeed)
+    // Stored on the socket so it survives hibernation.
+    connection.setState({ viewerId: viewer?.id ?? null, person })
 
     return this.serialize(async () => {
       // Reload so changes made outside this room, like a guest linking their
@@ -52,12 +60,23 @@ export class BoardRoom extends Server<Env> {
         connection.close(4404, 'Board not found')
         return
       }
+
+      const people = this.people()
       send(connection, {
         type: 'snapshot',
-        viewerId,
-        snapshot: snapshotFor(this.board, viewerId),
+        viewerId: viewer?.id ?? null,
+        snapshot: snapshotFor(this.board, viewer?.id ?? null),
+        you: person.key,
+        people,
       })
+      this.broadcast(encode({ type: 'presence', people }), [connection.id])
     })
+  }
+
+  override onClose(connection: Connection) {
+    this.broadcast(
+      encode({ type: 'presence', people: this.people(connection.id) }),
+    )
   }
 
   override onMessage(connection: Connection<ConnectionState>, raw: WSMessage) {
@@ -104,6 +123,18 @@ export class BoardRoom extends Server<Env> {
 
     if (result.stateChanged) {
       this.broadcast(encode({ type: 'state', state: this.board.state }))
+      const personKey = connection.state?.person.key
+      if (personKey) {
+        this.broadcast(
+          encode({
+            type: 'activity',
+            personKey,
+            decisionId: op.decisionId,
+            kind: op.kind,
+          }),
+          [connection.id],
+        )
+      }
     }
     if (op.kind === 'setVote' || op.kind === 'deleteDecision') {
       for (const own of this.getConnections(viewerId)) {
@@ -111,6 +142,16 @@ export class BoardRoom extends Server<Env> {
       }
     }
     send(connection, { type: 'ack', opId })
+  }
+
+  private people(leavingConnectionId?: string) {
+    const connections = [...this.getConnections<ConnectionState>()].map(
+      (connection) => ({
+        id: connection.id,
+        person: connection.state?.person,
+      }),
+    )
+    return presenceList(connections, leavingConnectionId)
   }
 
   private serialize<T>(task: () => Promise<T>): Promise<T> {

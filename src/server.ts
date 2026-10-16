@@ -2,7 +2,8 @@ import handler from '@tanstack/react-start/server-entry'
 import { env } from 'cloudflare:workers'
 import { routePartykitRequest } from 'partyserver'
 import { auth } from './server/auth'
-import { VIEWER_ID_HEADER } from './server/board-room'
+import { writeViewerHeaders } from './server/viewer-headers'
+import { readDeviceSeed } from './server/device'
 
 export { BoardRoom } from './server/board-room'
 
@@ -30,8 +31,11 @@ async function attachViewer(request: Request, lobby: { name: string }) {
   }
 
   const headers = new Headers(request.headers)
-  // Overwrite rather than append so clients can't claim another identity.
-  headers.set(VIEWER_ID_HEADER, session?.user.id ?? '')
+  writeViewerHeaders(
+    headers,
+    session?.user ?? null,
+    readDeviceSeed(request.headers.get('cookie')),
+  )
   return new Request(request, { headers })
 }
 

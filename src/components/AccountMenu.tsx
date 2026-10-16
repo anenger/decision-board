@@ -1,15 +1,29 @@
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { LogIn, LogOut, UserRound } from 'lucide-react'
+import { Github, LogOut } from 'lucide-react'
 import { useState } from 'react'
+import { Avatar } from './Avatar'
+import { Popover } from './Popover'
 import { authClient } from '@/lib/auth-client'
 import { sessionQuery } from '@/data/queries'
+import { personaFor } from '@/lib/board-sync/persona'
 
+/** You, as a sticker. Opens sign-in or sign-out. */
 export function AccountMenu() {
   const queryClient = useQueryClient()
   const {
-    data: { viewer, githubEnabled },
+    data: { viewer, githubEnabled, deviceSeed },
   } = useSuspenseQuery(sessionQuery)
   const [isPending, setIsPending] = useState(false)
+
+  const isSignedIn = viewer !== null && !viewer.isAnonymous
+  // Same choice as the board's presence list (src/server/presence.ts).
+  const persona = personaFor(isSignedIn ? viewer.id : deviceSeed)
+  const person = {
+    name: isSignedIn ? viewer.name : persona.name,
+    image: isSignedIn ? viewer.image : null,
+    emoji: persona.emoji,
+    color: persona.color,
+  }
 
   const signInWithGitHub = async () => {
     setIsPending(true)
@@ -27,52 +41,64 @@ export function AccountMenu() {
     setIsPending(false)
   }
 
-  if (viewer && !viewer.isAnonymous) {
-    return (
-      <div className="flex items-center gap-2">
-        {viewer.image ? (
-          <img
-            src={viewer.image}
-            alt=""
-            className="h-6 w-6 rounded-full border border-[#e2e4ea]"
-          />
-        ) : (
-          <UserRound size={15} className="text-[#6b6f80]" />
-        )}
-        <span className="hidden text-[13px] font-medium text-[#3a3a4a] sm:inline">
-          {viewer.name}
-        </span>
-        <button
-          type="button"
-          onClick={signOut}
-          disabled={isPending}
-          aria-label="Sign out"
-          className="focus-ring inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#9a9daa] transition-colors hover:bg-[#f0f1f4] hover:text-[#3a3a4a]"
-        >
-          <LogOut size={14} />
-        </button>
-      </div>
-    )
-  }
-
   return (
-    <div className="flex items-center gap-2">
-      {viewer && (
-        <span className="hidden text-[13px] text-[#6b6f80] sm:inline">
-          Guest
-        </span>
+    <Popover
+      label="Your account"
+      triggerClassName="btn-icon h-11 w-11"
+      trigger={<Avatar person={person} size={34} />}
+    >
+      {(close) => (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <Avatar person={person} size={44} />
+            <div className="min-w-0">
+              <p className="truncate font-display text-lg font-semibold">
+                {person.name}
+              </p>
+              <p className="text-sm text-ink-soft">
+                {isSignedIn
+                  ? 'Signed in with GitHub'
+                  : viewer
+                    ? "That's you! You're a guest"
+                    : "That's you, just looking around"}
+              </p>
+            </div>
+          </div>
+
+          {!isSignedIn && (
+            <p className="text-sm leading-snug text-ink-soft">
+              {githubEnabled
+                ? 'Sign in to keep your boards on every device. Anything you made as a guest comes with you.'
+                : 'Your boards live in this browser for now.'}
+            </p>
+          )}
+
+          {isSignedIn ? (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={async () => {
+                await signOut()
+                close()
+              }}
+              className="btn-chunky focus-ring w-full bg-white text-sm"
+            >
+              <LogOut size={16} />
+              Sign out
+            </button>
+          ) : githubEnabled ? (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={signInWithGitHub}
+              className="btn-chunky focus-ring w-full bg-ink text-sm text-white"
+            >
+              <Github size={16} />
+              Sign in with GitHub
+            </button>
+          ) : null}
+        </div>
       )}
-      {githubEnabled && (
-        <button
-          type="button"
-          onClick={signInWithGitHub}
-          disabled={isPending}
-          className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#e2e4ea] bg-white px-3 text-[13px] font-medium text-[#3a3a4a] transition-colors hover:bg-[#fafbfc]"
-        >
-          <LogIn size={13} />
-          Sign in with GitHub
-        </button>
-      )}
-    </div>
+    </Popover>
   )
 }

@@ -3,6 +3,7 @@ import { desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { getViewer, githubEnabled, requireViewer } from './auth'
 import { loadBoard, snapshotFor } from './board-store'
+import { getOrCreateDeviceSeed } from './device'
 import type { BoardSummary } from '@/lib/board'
 import type { BoardSnapshot } from '@/lib/board-sync/protocol'
 import { db } from '@/db'
@@ -12,7 +13,11 @@ import { boards } from '@/db/schema'
 // (src/server/board-room.ts); these functions cover reads and accounts.
 
 export const getSessionInfo = createServerFn({ method: 'GET' }).handler(
-  async () => ({ viewer: await getViewer(), githubEnabled }),
+  async () => ({
+    viewer: await getViewer(),
+    githubEnabled,
+    deviceSeed: getOrCreateDeviceSeed(),
+  }),
 )
 
 /**

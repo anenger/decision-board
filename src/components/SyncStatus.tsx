@@ -1,16 +1,11 @@
 import { X } from 'lucide-react'
+import { Mascot } from './Mascot'
 import type { ConnectionStatus } from '@/lib/board-sync/board-client'
 
 const labels: Record<ConnectionStatus, string> = {
   live: 'Live',
   connecting: 'Connecting',
   offline: 'Offline',
-}
-
-const dotStyles: Record<ConnectionStatus, string> = {
-  live: 'bg-emerald-500',
-  connecting: 'bg-amber-400',
-  offline: 'bg-[#9a9daa]',
 }
 
 export function SyncStatus({
@@ -20,24 +15,33 @@ export function SyncStatus({
   status: ConnectionStatus
   pendingCount: number
 }) {
-  const pendingLabel =
+  const pending =
     pendingCount > 0
-      ? ` · ${pendingCount} change${pendingCount === 1 ? '' : 's'} ${status === 'live' ? 'saving' : 'pending'}`
+      ? ` · ${pendingCount} ${status === 'live' ? 'saving' : 'waiting'}`
       : ''
 
   return (
     <span
       role="status"
       data-testid="sync-status"
-      className="inline-flex items-center gap-1.5 font-['IBM_Plex_Mono',monospace] text-[11px] text-[#6b6f80]"
+      className="inline-flex items-center gap-2 rounded-full border-2 border-ink bg-white px-3 py-1 text-sm font-bold"
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${dotStyles[status]}`} />
+      <span
+        className={`h-2.5 w-2.5 rounded-full ${
+          status === 'live'
+            ? 'anim-pulse-dot bg-[#2fbf7f]'
+            : status === 'connecting'
+              ? 'animate-pulse bg-[#f5b700]'
+              : 'bg-ink-faint'
+        }`}
+      />
       {labels[status]}
-      {pendingLabel}
+      {pending}
     </span>
   )
 }
 
+/** A friendly toast that floats above the Ask button. */
 export function SyncError({
   message,
   onDismiss,
@@ -46,19 +50,25 @@ export function SyncError({
   onDismiss: () => void
 }) {
   return (
-    <div
-      role="alert"
-      className="anim-fade-rise mt-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-[13px] text-red-700"
-    >
-      <span>{message}</span>
-      <button
-        type="button"
-        onClick={onDismiss}
-        aria-label="Dismiss"
-        className="focus-ring inline-flex h-6 w-6 items-center justify-center rounded-md text-red-500 hover:bg-red-100"
+    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 sm:bottom-8">
+      <div
+        role="alert"
+        className="anim-pop sticker pointer-events-auto flex w-full max-w-md items-center gap-3 bg-white py-2.5 pr-2 pl-3"
       >
-        <X size={13} />
-      </button>
+        <Mascot mood="surprised" size={36} color="#ffd0e2" />
+        <p className="min-w-0 flex-1 text-sm font-semibold">
+          <span className="font-display">Whoops! </span>
+          {message}
+        </p>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="btn-icon focus-ring h-10 w-10 shrink-0"
+        >
+          <X size={18} />
+        </button>
+      </div>
     </div>
   )
 }

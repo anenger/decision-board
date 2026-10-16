@@ -47,6 +47,9 @@ export function useBoardSync(
     status: view.status,
     pendingCount: view.pendingCount,
     error: view.error,
+    people: view.people,
+    you: view.you,
+    activity: view.activity,
     submit: client.submit,
     dismissError: client.dismissError,
   }

@@ -1,214 +1,332 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/fredoka';
+@import '@fontsource-variable/nunito';
 
-@import 'tw-animate-css';
+@theme {
+  --font-display: 'Fredoka Variable', ui-rounded, system-ui, sans-serif;
+  --font-sans: 'Nunito Variable', ui-rounded, system-ui, sans-serif;
 
-@custom-variant dark (&:is(.dark *));
+  /* Paper and ink */
+  --color-paper: #fff7ec;
+  --color-paper-deep: #ffecd6;
+  --color-ink: #2a2238;
+  --color-ink-soft: #625a76;
+  --color-ink-faint: #9c94ad;
+
+  /* Accents */
+  --color-tomato: #ff6b4a;
+  --color-tomato-deep: #e8522f;
+  --color-bubblegum: #ffd0e2;
+  --color-tangerine: #ffd6b3;
+  --color-butter: #ffeeb0;
+  --color-mint: #c8f0db;
+  --color-sky: #cfe6ff;
+  --color-lilac: #e3d6ff;
+
+  --shadow-sticker: 3px 3px 0 0 var(--color-ink);
+  --shadow-sticker-lg: 6px 6px 0 0 var(--color-ink);
+
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-squish: cubic-bezier(0.68, -0.4, 0.32, 1.4);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Room for the floating button and the iPhone home indicator. */
+  scroll-padding-bottom: 6rem;
+}
 
 body {
-  @apply m-0;
-  font-family: 'DM Sans', system-ui, sans-serif;
+  margin: 0;
+  min-height: 100dvh;
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f7f8fa;
+  -webkit-tap-highlight-color: transparent;
 }
 
 h1,
 h2,
-h3,
-h4 {
-  font-family: 'DM Sans', system-ui, sans-serif;
+h3 {
+  font-family: var(--font-display);
+  text-wrap: balance;
 }
 
-code {
-  font-family:
-    source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
-}
+/* Custom classes live in the components layer so Tailwind utilities like
+   `hidden sm:inline-flex` can still override them. */
+@layer components {
+  /* ── Focus ──────────────────────────────────────────────── */
 
-:root {
-  --background: #f7f8fa;
-  --foreground: #1a1a2e;
-  --card: #ffffff;
-  --card-foreground: #1a1a2e;
-  --popover: #ffffff;
-  --popover-foreground: #1a1a2e;
-  --primary: #4f6df5;
-  --primary-foreground: #ffffff;
-  --secondary: #f0f1f4;
-  --secondary-foreground: #3a3a4a;
-  --muted: #f0f1f4;
-  --muted-foreground: #6b6f80;
-  --accent: #4f6df5;
-  --accent-foreground: #ffffff;
-  --destructive: #e5484d;
-  --destructive-foreground: #ffffff;
-  --border: #e2e4ea;
-  --input: #e2e4ea;
-  --ring: #4f6df5;
-  --chart-1: oklch(0.7 0.12 260);
-  --chart-2: oklch(0.72 0.12 200);
-  --chart-3: oklch(0.68 0.08 120);
-  --chart-4: oklch(0.8 0.1 60);
-  --chart-5: oklch(0.75 0.12 320);
-  --radius: 0.5rem;
-  --sidebar: #ffffff;
-  --sidebar-foreground: #1a1a2e;
-  --sidebar-primary: #4f6df5;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f0f1f4;
-  --sidebar-accent-foreground: #3a3a4a;
-  --sidebar-border: #e2e4ea;
-  --sidebar-ring: #4f6df5;
-}
-
-.dark {
-  --background: #111119;
-  --foreground: #ededef;
-  --card: #1a1a24;
-  --card-foreground: #ededef;
-  --popover: #1a1a24;
-  --popover-foreground: #ededef;
-  --primary: #6b8aff;
-  --primary-foreground: #111119;
-  --secondary: #252530;
-  --secondary-foreground: #ededef;
-  --muted: #252530;
-  --muted-foreground: #8b8d9a;
-  --accent: #252530;
-  --accent-foreground: #ededef;
-  --destructive: #e5484d;
-  --destructive-foreground: #ededef;
-  --border: #2a2a38;
-  --input: #2a2a38;
-  --ring: #6b8aff;
-  --chart-1: oklch(0.7 0.12 260);
-  --chart-2: oklch(0.72 0.12 200);
-  --chart-3: oklch(0.68 0.08 120);
-  --chart-4: oklch(0.8 0.1 60);
-  --chart-5: oklch(0.75 0.12 320);
-  --sidebar: #1a1a24;
-  --sidebar-foreground: #ededef;
-  --sidebar-primary: #6b8aff;
-  --sidebar-primary-foreground: #111119;
-  --sidebar-accent: #252530;
-  --sidebar-accent-foreground: #ededef;
-  --sidebar-border: #2a2a38;
-  --sidebar-ring: #6b8aff;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
+  .focus-ring {
+    outline: none;
   }
-  body {
-    @apply bg-background text-foreground;
+
+  .focus-ring:focus-visible {
+    outline: 3px solid var(--color-tomato);
+    outline-offset: 3px;
+  }
+
+  /* ── Chunky press-down buttons ──────────────────────────── */
+
+  .btn-chunky {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    border: 2px solid var(--color-ink);
+    border-radius: 999px;
+    box-shadow: var(--shadow-sticker);
+    font-family: var(--font-display);
+    font-weight: 600;
+    transition:
+      transform 0.12s var(--ease-spring),
+      box-shadow 0.12s var(--ease-spring),
+      background-color 0.15s ease;
+  }
+
+  .btn-chunky:hover:not(:disabled) {
+    transform: translate(-1px, -1px);
+    box-shadow: 4px 4px 0 0 var(--color-ink);
+  }
+
+  .btn-chunky:active:not(:disabled) {
+    transform: translate(3px, 3px);
+    box-shadow: 0 0 0 0 var(--color-ink);
+  }
+
+  .btn-chunky:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+    box-shadow: none;
+  }
+
+  /* Small round icon buttons share the press feel without the shadow. */
+  .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    transition:
+      transform 0.15s var(--ease-spring),
+      background-color 0.15s ease;
+  }
+
+  .btn-icon:hover {
+    background-color: rgb(42 34 56 / 0.07);
+    transform: rotate(-6deg) scale(1.06);
+  }
+
+  .btn-icon:active {
+    transform: scale(0.9);
+  }
+
+  /* ── Sticker cards ──────────────────────────────────────── */
+
+  .sticker {
+    border: 2px solid var(--color-ink);
+    border-radius: 1.5rem;
+    box-shadow: var(--shadow-sticker-lg);
+  }
+
+  .lift {
+    transition:
+      transform 0.2s var(--ease-spring),
+      box-shadow 0.2s var(--ease-spring);
+  }
+
+  @media (hover: hover) {
+    .lift:hover {
+      transform: translate(-2px, -3px) rotate(-0.4deg);
+      box-shadow: 8px 9px 0 0 var(--color-ink);
+    }
+  }
+
+  /* ── Animations ─────────────────────────────────────────── */
+
+  @keyframes pop-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.85) rotate(-2deg) translateY(10px);
+    }
+    60% {
+      opacity: 1;
+      transform: scale(1.03) rotate(0.6deg) translateY(-2px);
+    }
+    100% {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .anim-pop {
+    animation: pop-in 0.5s var(--ease-spring) both;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .anim-rise {
+    animation: rise 0.45s var(--ease-spring) both;
+  }
+
+  @keyframes wiggle {
+    0%,
+    100% {
+      transform: rotate(0);
+    }
+    20% {
+      transform: rotate(-1.6deg) scale(1.01);
+    }
+    40% {
+      transform: rotate(1.4deg) scale(1.01);
+    }
+    60% {
+      transform: rotate(-0.8deg);
+    }
+    80% {
+      transform: rotate(0.5deg);
+    }
+  }
+
+  .anim-wiggle {
+    animation: wiggle 0.6s ease-in-out;
+  }
+
+  @keyframes bump {
+    0% {
+      transform: scale(1);
+    }
+    40% {
+      transform: scale(1.35) rotate(-6deg);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .anim-bump {
+    animation: bump 0.35s var(--ease-spring);
+  }
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0) rotate(var(--tilt, 0deg));
+    }
+    50% {
+      transform: translateY(-10px) rotate(calc(var(--tilt, 0deg) * -1));
+    }
+  }
+
+  .anim-float {
+    animation: float var(--float-duration, 6s) ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgb(47 191 127 / 0.55);
+    }
+    60% {
+      box-shadow: 0 0 0 6px rgb(47 191 127 / 0);
+    }
+  }
+
+  .anim-pulse-dot {
+    animation: pulse-dot 1.8s ease-out infinite;
+  }
+
+  /* Sparkles flying out of a vote. Each particle sets --dx, --dy and --spin. */
+  @keyframes burst {
+    0% {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(0.4);
+    }
+    70% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy)))
+        scale(1) rotate(var(--spin));
+    }
+  }
+
+  .anim-burst {
+    animation: burst 0.75s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+  }
+
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: none;
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .anim-fade {
+    animation: fade-in 0.2s ease-out both;
+  }
+
+  /* Bottom sheet on phones, springy dialog from the sm breakpoint up. */
+  .anim-sheet {
+    animation: sheet-up 0.38s var(--ease-spring) both;
+  }
+
+  @media (min-width: 40rem) {
+    .anim-sheet {
+      animation: pop-in 0.42s var(--ease-spring) both;
+    }
+  }
+
+  @keyframes bounce-dot {
+    0%,
+    80%,
+    100% {
+      transform: translateY(0) scale(1);
+    }
+    40% {
+      transform: translateY(-14px) scale(1.1);
+    }
+  }
+
+  .anim-bounce-dot {
+    animation: bounce-dot 1s var(--ease-spring) infinite;
+  }
+
+  /* Vote bars spring to their new width. */
+  .vote-fill {
+    transition: width 0.6s var(--ease-squish);
   }
 }
 
-/* ── Entrance animation ──────────────────────────────── */
-
-@keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.anim-fade-rise {
-  animation: fade-in-up 0.25s ease-out both;
-}
-
-/* ── Stagger delay utility classes ───────────────────── */
-
-.stagger-1 {
-  animation-delay: 0.03s;
-}
-.stagger-2 {
-  animation-delay: 0.06s;
-}
-.stagger-3 {
-  animation-delay: 0.09s;
-}
-.stagger-4 {
-  animation-delay: 0.12s;
-}
-.stagger-5 {
-  animation-delay: 0.15s;
-}
-.stagger-6 {
-  animation-delay: 0.18s;
-}
-.stagger-7 {
-  animation-delay: 0.21s;
-}
-.stagger-8 {
-  animation-delay: 0.24s;
-}
-
-/* ── Focus ring ──────────────────────────────────────── */
-
-.focus-ring {
-  @apply outline-none;
-  transition: box-shadow 0.15s ease;
-}
-
-.focus-ring:focus-visible {
-  box-shadow:
-    0 0 0 2px var(--background),
-    0 0 0 4px var(--primary);
-}
-
-/* ── Subtle hover lift for interactive cards ─────────── */
-
-.hover-lift {
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease;
-}
-
-.hover-lift:hover {
-  background-color: #f7f8fa;
-  border-color: #d0d3db;
 }
