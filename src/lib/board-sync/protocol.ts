@@ -7,7 +7,8 @@
 export type OptionState = {
   id: string
   text: string
-  votes: number
+  /** Null while the decision hides its results and voting is still open. */
+  votes: number | null
 }
 
 export type DecisionState = {
@@ -15,8 +16,24 @@ export type DecisionState = {
   title: string
   createdById: string
   createdAt: number
+  /** Voting stops at this time (ms), if set. */
+  closesAt: number | null
+  /** When someone closed voting by hand (ms). */
+  closedAt: number | null
+  hideResults: boolean
+  /** Always visible, even when per-option counts are hidden. */
+  totalVotes: number
   options: Array<OptionState>
 }
+
+/**
+ * What someone can do on a board. Owners do everything; editors ask
+ * questions; voters vote and add options; viewers only watch.
+ */
+export type Role = 'owner' | 'editor' | 'voter' | 'viewer'
+
+/** Roles an invite link can grant. */
+export type InviteRole = 'editor' | 'voter'
 
 /** Board contents that are the same for every viewer. */
 export type BoardState = {
@@ -35,6 +52,8 @@ export type VoteMap = Record<string, string>
 export type BoardSnapshot = {
   state: BoardState
   myVotes: VoteMap
+  /** The viewer's own role on this board. */
+  role: Role
 }
 
 /**
@@ -48,12 +67,16 @@ export type Operation =
       decisionId: string
       title: string
       options: Array<{ id: string; text: string }>
+      closesAt: number | null
+      hideResults: boolean
     }
   | { kind: 'renameDecision'; decisionId: string; title: string }
   | { kind: 'deleteDecision'; decisionId: string }
   | { kind: 'addOption'; decisionId: string; optionId: string; text: string }
   /** Sets rather than toggles the vote, so replays are harmless. */
   | { kind: 'setVote'; decisionId: string; optionId: string | null }
+  /** Closes voting now, or reopens it with no deadline. */
+  | { kind: 'setDecisionClosed'; decisionId: string; closed: boolean }
 
 export type ClientMessage = {
   type: 'op'
@@ -78,6 +101,7 @@ export type ActivityKind =
   | 'deleteDecision'
   | 'addOption'
   | 'setVote'
+  | 'setDecisionClosed'
 
 export type ServerMessage =
   /** Sent on connect. `viewerId` is who the server thinks this socket is. */
@@ -114,4 +138,32 @@ export const LIMITS = {
   decisionsPerBoard: 100,
   optionsPerDecision: 50,
   messageBytes: 32_000,
+  /** Deadlines can be at most this far ahead. */
+  maxDeadlineMs: 90 * 24 * 60 * 60 * 1000,
 } as const
+
+const ROLE_RANK: Record<Role, number> = {
+  viewer: 0,
+  voter: 1,
+  editor: 2,
+  owner: 3,
+}
+
+export function hasRole(role: Role, atLeast: Role) {
+  return ROLE_RANK[role] >= ROLE_RANK[atLeast]
+}
+
+/** The higher of two roles; invites never demote anyone. */
+export function higherRole<T extends Role>(a: T, b: T): T {
+  return ROLE_RANK[a] >= ROLE_RANK[b] ? a : b
+}
+
+export function isDecisionOpen(
+  decision: Pick<DecisionState, 'closesAt' | 'closedAt'>,
+  now: number,
+) {
+  return (
+    decision.closedAt === null &&
+    (decision.closesAt === null || now < decision.closesAt)
+  )
+}

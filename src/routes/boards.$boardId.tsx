@@ -1,11 +1,19 @@
-import { Link, createFileRoute, notFound } from '@tanstack/react-router'
+import {
+  Link,
+  createFileRoute,
+  notFound,
+  useNavigate,
+} from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSuspenseQuery } from '@tanstack/react-query'
+import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { ArrowLeft, Check, Plus, Share2 } from 'lucide-react'
-import type { BoardSnapshot } from '@/lib/board-sync/protocol'
+import type { BoardSnapshot, Role } from '@/lib/board-sync/protocol'
 import type { Activity } from '@/lib/board-sync/board-client'
+import type { NewDecision } from '@/components/NewDecisionSheet'
 import DecisionCard from '@/components/DecisionCard'
+import { Burst } from '@/components/Burst'
 import { NewDecisionSheet } from '@/components/NewDecisionSheet'
+import { ShareSheet } from '@/components/ShareSheet'
 import { Loader } from '@/components/Loader'
 import { AccountMenu } from '@/components/AccountMenu'
 import { Mascot } from '@/components/Mascot'
@@ -13,9 +21,17 @@ import { PresenceStack } from '@/components/PresenceStack'
 import { SyncError, SyncStatus } from '@/components/SyncStatus'
 import { boardQueries, sessionQuery } from '@/data/queries'
 import { useBoardSync } from '@/lib/board-sync/use-board-sync'
+import { hasRole } from '@/lib/board-sync/protocol'
 import { useHydrated } from '@/lib/use-hydrated'
+import { acceptBoardInvite } from '@/server/boards'
 
 export const Route = createFileRoute('/boards/$boardId')({
+  validateSearch: (search): { invite?: string } => ({
+    invite:
+      typeof search.invite === 'string' && search.invite.length <= 64
+        ? search.invite
+        : undefined,
+  }),
   pendingComponent: () => <Loader />,
   loader: async ({ context: { queryClient }, params: { boardId } }) => {
     const [snapshot] = await Promise.all([
@@ -34,6 +50,13 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',
 })
+
+const ROLE_CHIPS: Record<Role, string> = {
+  owner: "👑 You're the owner",
+  editor: '✏️ Editor',
+  voter: '🗳️ Voter',
+  viewer: '👀 Watching',
+}
 
 function BoardRoute() {
   const { boardId } = Route.useParams()
@@ -73,20 +96,19 @@ function LiveBoard({
     people,
     you,
     activity,
+    reconnect,
   } = useBoardSync(boardId, initial, viewerId)
   const { board, decisions } = details
   const [isAsking, setIsAsking] = useState(false)
+  const [isSharing, setIsSharing] = useState(false)
+  const invite = useInvite(boardId, reconnect)
+  const canInvite = hasRole(board.role, 'editor')
   const titleRef = useRef<HTMLHeadingElement>(null)
   const titleOffscreen = useIsOffscreen(titleRef)
   const hydrated = useHydrated()
 
   const totalVotes = useMemo(
-    () =>
-      decisions.reduce(
-        (sum, decision) =>
-          sum + decision.options.reduce((inner, o) => inner + o.votes, 0),
-        0,
-      ),
+    () => decisions.reduce((sum, decision) => sum + decision.totalVotes, 0),
     [decisions],
   )
 
@@ -97,18 +119,21 @@ function LiveBoard({
   }, [activity])
 
   const createDecision = useCallback(
-    (title: string, options: Array<string>) => {
+    ({ title, options, closesAt, hideResults }: NewDecision) => {
       submit({
         kind: 'createDecision',
         decisionId: crypto.randomUUID(),
         title,
         options: options.map((text) => ({ id: crypto.randomUUID(), text })),
+        closesAt,
+        hideResults,
       })
       setIsAsking(false)
     },
     [submit],
   )
   const closeSheet = useCallback(() => setIsAsking(false), [])
+  const closeShare = useCallback(() => setIsSharing(false), [])
 
   return (
     <div className="min-h-dvh pb-28 sm:pb-16">
@@ -131,16 +156,29 @@ function LiveBoard({
             {board.name}
           </p>
           <PresenceStack people={people} you={you} />
-          <ShareButton />
+          {canInvite ? (
+            <button
+              type="button"
+              onClick={() => setIsSharing(true)}
+              aria-label="Invite people"
+              className="btn-icon focus-ring h-11 w-11"
+            >
+              <Share2 size={20} />
+            </button>
+          ) : (
+            <ShareButton />
+          )}
           <AccountMenu />
-          <button
-            type="button"
-            onClick={() => setIsAsking(true)}
-            className="btn-chunky focus-ring ml-1 hidden bg-tomato px-5 text-white sm:inline-flex"
-          >
-            <Plus size={18} strokeWidth={2.75} />
-            Ask a question
-          </button>
+          {board.canAsk && (
+            <button
+              type="button"
+              onClick={() => setIsAsking(true)}
+              className="btn-chunky focus-ring ml-1 hidden bg-tomato px-5 text-white sm:inline-flex"
+            >
+              <Plus size={18} strokeWidth={2.75} />
+              Ask a question
+            </button>
+          )}
         </div>
       </header>
 
@@ -153,6 +191,7 @@ function LiveBoard({
         </h1>
         <div className="anim-rise mt-4 flex flex-wrap items-center gap-2 [animation-delay:60ms]">
           <SyncStatus status={status} pendingCount={pendingCount} />
+          <Chip>{ROLE_CHIPS[board.role]}</Chip>
           <Chip>
             💡 {decisions.length} question{decisions.length === 1 ? '' : 's'}
           </Chip>
@@ -165,8 +204,12 @@ function LiveBoard({
           )}
         </div>
 
+        <InviteBanner state={invite} role={board.role} />
+
         {decisions.length === 0 ? (
-          <EmptyBoard onAsk={() => setIsAsking(true)} />
+          <EmptyBoard
+            onAsk={board.canAsk ? () => setIsAsking(true) : undefined}
+          />
         ) : (
           <div className="mt-8 grid items-start gap-6 md:grid-cols-2">
             {decisions.map((decision, index) => (
@@ -174,7 +217,9 @@ function LiveBoard({
                 key={decision.id}
                 // min-w-0 lets a long unbroken word wrap instead of widening
                 // the grid column past the screen.
-                className="anim-pop min-w-0"
+                // Raised while its menu is open, so the menu sits above the
+                // cards below it.
+                className="anim-pop relative min-w-0 has-[[aria-expanded=true]]:z-20"
                 style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}
               >
                 <DecisionCard
@@ -207,6 +252,13 @@ function LiveBoard({
                       text,
                     })
                   }
+                  onSetClosed={(closed) =>
+                    submit({
+                      kind: 'setDecisionClosed',
+                      decisionId: decision.id,
+                      closed,
+                    })
+                  }
                 />
               </div>
             ))}
@@ -215,17 +267,26 @@ function LiveBoard({
       </main>
 
       {/* Thumb-reachable on phones; the header has its own button above sm. */}
-      <button
-        type="button"
-        onClick={() => setIsAsking(true)}
-        className="btn-chunky focus-ring fixed right-4 bottom-[max(1.25rem,env(safe-area-inset-bottom))] z-30 bg-tomato px-6 py-3 text-lg text-white shadow-sticker-lg sm:hidden"
-      >
-        <Plus size={22} strokeWidth={2.75} />
-        Ask
-      </button>
+      {board.canAsk && (
+        <button
+          type="button"
+          onClick={() => setIsAsking(true)}
+          className="btn-chunky focus-ring fixed right-4 bottom-[max(1.25rem,env(safe-area-inset-bottom))] z-30 bg-tomato px-6 py-3 text-lg text-white shadow-sticker-lg sm:hidden"
+        >
+          <Plus size={22} strokeWidth={2.75} />
+          Ask
+        </button>
+      )}
 
       {isAsking && (
         <NewDecisionSheet onClose={closeSheet} onCreate={createDecision} />
+      )}
+      {isSharing && (
+        <ShareSheet
+          boardId={boardId}
+          boardName={board.name}
+          onClose={closeShare}
+        />
       )}
       {error && <SyncError message={error} onDismiss={dismissError} />}
     </div>
@@ -257,22 +318,138 @@ function Chip({ children }: { children: React.ReactNode }) {
   )
 }
 
-function EmptyBoard({ onAsk }: { onAsk: () => void }) {
+function EmptyBoard({ onAsk }: { onAsk?: () => void }) {
   return (
     <div className="anim-pop sticker mt-8 flex flex-col items-center bg-white px-6 py-12 text-center sm:py-16">
       <Mascot mood="sleepy" size={96} className="anim-float" />
       <h2 className="mt-5 text-2xl font-semibold">It's quiet in here…</h2>
       <p className="mt-2 max-w-xs text-ink-soft">
-        Ask the group something and watch the votes roll in.
+        {onAsk
+          ? 'Ask the group something and watch the votes roll in.'
+          : 'No questions yet. They’ll pop up here the moment someone asks.'}
       </p>
-      <button
-        type="button"
-        onClick={onAsk}
-        className="btn-chunky focus-ring mt-6 bg-tomato px-6 text-white"
-      >
-        <Plus size={18} strokeWidth={2.75} />
-        Ask the first question
-      </button>
+      {onAsk && (
+        <button
+          type="button"
+          onClick={onAsk}
+          className="btn-chunky focus-ring mt-6 bg-tomato px-6 text-white"
+        >
+          <Plus size={18} strokeWidth={2.75} />
+          Ask the first question
+        </button>
+      )}
+    </div>
+  )
+}
+
+type InviteState =
+  | { status: 'idle' }
+  | { status: 'joining' }
+  | { status: 'joined'; role: Role }
+  | { status: 'failed'; message: string }
+
+/**
+ * Joins the board when the URL has an invite token, then removes the token
+ * from the address bar. Runs in the browser only, so link previews and
+ * crawlers never become members.
+ */
+function useInvite(boardId: string, reconnect: () => void): InviteState {
+  const { invite } = Route.useSearch()
+  const navigate = useNavigate({ from: '/boards/$boardId' })
+  const queryClient = useQueryClient()
+  const [state, setState] = useState<InviteState>({ status: 'idle' })
+
+  useEffect(() => {
+    if (!invite) return
+    setState({ status: 'joining' })
+    acceptBoardInvite({ data: { boardId, token: invite } })
+      .then(async ({ role }) => {
+        // Joining may have created a guest account; the socket must
+        // reconnect with the new session to get the new role.
+        await queryClient.invalidateQueries(sessionQuery)
+        void queryClient.invalidateQueries(boardQueries.mine())
+        reconnect()
+        setState({ status: 'joined', role })
+      })
+      .catch((error: unknown) =>
+        setState({
+          status: 'failed',
+          message:
+            error instanceof Error ? error.message : 'That invite didn’t work',
+        }),
+      )
+      .finally(() =>
+        navigate({ search: {}, replace: true, resetScroll: false }),
+      )
+  }, [invite, boardId, navigate, queryClient, reconnect])
+
+  // The welcome note fades after a few seconds.
+  useEffect(() => {
+    if (state.status !== 'joined') return
+    const timer = setTimeout(() => setState({ status: 'idle' }), 5000)
+    return () => clearTimeout(timer)
+  }, [state.status])
+
+  return state
+}
+
+const JOINED_MESSAGES: Record<Role, string> = {
+  owner: 'This is your board. Welcome back! 👑',
+  editor: "You're in! Ask questions and vote away. ✏️",
+  voter: "You're in! Tap an option to vote. 🗳️",
+  viewer: "You're in! 👀",
+}
+
+function InviteBanner({ state, role }: { state: InviteState; role: Role }) {
+  if (state.status === 'joining') {
+    return <Banner mood="🎟️">Joining the board…</Banner>
+  }
+  if (state.status === 'joined') {
+    return (
+      <div className="relative">
+        <Banner mood="🎉" tone="bg-mint">
+          {JOINED_MESSAGES[state.role]}
+        </Banner>
+        <Burst seed={7} className="top-1/2 left-8" />
+      </div>
+    )
+  }
+  if (state.status === 'failed') {
+    return (
+      <Banner mood="😬" tone="bg-bubblegum">
+        {state.message}
+      </Banner>
+    )
+  }
+  if (role === 'viewer') {
+    return (
+      <Banner mood="👀">
+        You're watching this board. Ask someone on it for an invite link to join
+        in.
+      </Banner>
+    )
+  }
+  return null
+}
+
+function Banner({
+  mood,
+  tone = 'bg-white',
+  children,
+}: {
+  mood: string
+  tone?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div
+      role="status"
+      className={`anim-pop sticker mt-6 flex items-center gap-3 px-4 py-3 ${tone}`}
+    >
+      <span aria-hidden="true" className="text-2xl">
+        {mood}
+      </span>
+      <p className="font-semibold">{children}</p>
     </div>
   )
 }
@@ -321,7 +498,7 @@ function ShareButton() {
           role="status"
           className="anim-pop absolute top-[calc(100%+0.4rem)] right-0 rounded-full border-2 border-ink bg-butter px-3 py-1 text-sm font-bold whitespace-nowrap shadow-sticker"
         >
-          Link copied! 🎉
+          Link copied! They can watch 👀
         </span>
       )}
     </div>

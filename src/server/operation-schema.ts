@@ -14,6 +14,8 @@ const operationSchema = z.discriminatedUnion('kind', [
       .array(z.object({ id, text: optionText }))
       .min(1)
       .max(20),
+    closesAt: z.number().int().positive().nullable(),
+    hideResults: z.boolean(),
   }),
   z.object({ kind: z.literal('renameDecision'), decisionId: id, title }),
   z.object({ kind: z.literal('deleteDecision'), decisionId: id }),
@@ -27,6 +29,11 @@ const operationSchema = z.discriminatedUnion('kind', [
     kind: z.literal('setVote'),
     decisionId: id,
     optionId: id.nullable(),
+  }),
+  z.object({
+    kind: z.literal('setDecisionClosed'),
+    decisionId: id,
+    closed: z.boolean(),
   }),
 ])
 

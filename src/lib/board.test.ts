@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { canEditDecision } from './board'
+import { canManageDecision } from './board'
 
-describe('canEditDecision', () => {
-  const decision = { createdById: 'author', ownerId: 'owner' }
+describe('canManageDecision', () => {
+  const decision = { createdById: 'author' }
 
-  it('allows the board owner and the decision author', () => {
-    expect(canEditDecision('owner', decision)).toBe(true)
-    expect(canEditDecision('author', decision)).toBe(true)
+  it('allows the owner on any question', () => {
+    expect(canManageDecision('owner', 'owner', decision)).toBe(true)
   })
 
-  it('rejects other users and signed-out visitors', () => {
-    expect(canEditDecision('someone-else', decision)).toBe(false)
-    expect(canEditDecision(null, decision)).toBe(false)
+  it('allows the author while they can still take part', () => {
+    expect(canManageDecision('author', 'editor', decision)).toBe(true)
+    expect(canManageDecision('author', 'voter', decision)).toBe(true)
+    expect(canManageDecision('author', 'viewer', decision)).toBe(false)
+  })
+
+  it('rejects other people and signed-out visitors', () => {
+    expect(canManageDecision('someone-else', 'editor', decision)).toBe(false)
+    expect(canManageDecision(null, 'viewer', decision)).toBe(false)
   })
 })

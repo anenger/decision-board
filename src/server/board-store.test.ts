@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { commitOperation, loadBoard } from './board-store'
+import { commitOperation, loadBoard, snapshotFor } from './board-store'
 import type { LoadedBoard } from './board-store'
 import type { Operation } from '@/lib/board-sync/protocol'
 import type { TestDb } from '@/db/test-db'
-import { boards, user } from '@/db/schema'
+import { boardMembers, boards, user } from '@/db/schema'
 import { createTestDb } from '@/db/test-db'
 
 let db: TestDb
@@ -23,7 +23,11 @@ function commit(board: LoadedBoard, op: Operation, actor: string) {
 /** What a fresh load sees, in the same shape as the in-memory board. */
 async function reloaded(boardId = 'board') {
   const board = await load(boardId)
-  return { state: board.state, votes: Object.fromEntries(board.votesByUser) }
+  return {
+    state: board.state,
+    votes: Object.fromEntries(board.votesByUser),
+    members: Object.fromEntries(board.members),
+  }
 }
 
 function inMemory(board: LoadedBoard) {
@@ -31,7 +35,11 @@ function inMemory(board: LoadedBoard) {
   const votes = Object.fromEntries(
     [...board.votesByUser].filter(([, v]) => Object.keys(v).length > 0),
   )
-  return { state: board.state, votes }
+  return {
+    state: board.state,
+    votes,
+    members: Object.fromEntries(board.members),
+  }
 }
 
 beforeEach(async () => {
@@ -47,6 +55,15 @@ beforeEach(async () => {
     { id: 'board', name: 'Offsite', ownerId: 'owner' },
     { id: 'other-board', name: 'Elsewhere', ownerId: 'owner' },
   ])
+  await db.insert(boardMembers).values(
+    ['board', 'other-board'].flatMap((boardId) =>
+      ['alice', 'bob'].map((userId) => ({
+        boardId,
+        userId,
+        role: 'editor' as const,
+      })),
+    ),
+  )
 })
 
 describe('commitOperation', () => {
@@ -58,6 +75,8 @@ describe('commitOperation', () => {
           kind: 'createDecision',
           decisionId: 'lunch',
           title: 'Lunch?',
+          closesAt: null,
+          hideResults: false,
           options: [
             { id: 'pizza', text: 'Pizza' },
             { id: 'tacos', text: 'Tacos' },
@@ -70,6 +89,8 @@ describe('commitOperation', () => {
           kind: 'createDecision',
           decisionId: 'venue',
           title: 'Venue?',
+          closesAt: null,
+          hideResults: false,
           options: [{ id: 'park', text: 'Park' }],
         },
         'bob',
@@ -119,6 +140,8 @@ describe('commitOperation', () => {
       kind: 'createDecision',
       decisionId: 'lunch',
       title: 'Lunch?',
+      closesAt: null,
+      hideResults: false,
       options: [{ id: 'pizza', text: 'Pizza' }],
     }
     const vote: Operation = {
@@ -143,6 +166,8 @@ describe('commitOperation', () => {
         kind: 'createDecision',
         decisionId: 'lunch',
         title: 'Lunch?',
+        closesAt: null,
+        hideResults: false,
         options: [{ id: 'pizza', text: 'Pizza' }],
       },
       'alice',
@@ -174,6 +199,8 @@ describe('commitOperation', () => {
         kind: 'createDecision',
         decisionId: 'secret',
         title: 'Other board decision',
+        closesAt: null,
+        hideResults: false,
         options: [{ id: 'secret-option', text: 'x' }],
       },
       'owner',
@@ -186,6 +213,8 @@ describe('commitOperation', () => {
         kind: 'createDecision',
         decisionId: 'secret',
         title: 'Collides',
+        closesAt: null,
+        hideResults: false,
         options: [{ id: 'fresh', text: 'x' }],
       },
       'bob',
@@ -202,5 +231,112 @@ describe('commitOperation', () => {
     expect((await reloaded('other-board')).state.decisions[0]?.title).toBe(
       'Other board decision',
     )
+  })
+})
+
+describe('commitOperation roles and deadlines', () => {
+  it('lets viewers watch but not vote', async () => {
+    await db.insert(user).values({
+      id: 'carol',
+      name: 'carol',
+      email: 'carol@example.com',
+    })
+    const board = await load()
+    await commit(
+      board,
+      {
+        kind: 'createDecision',
+        decisionId: 'lunch',
+        title: 'Lunch?',
+        options: [{ id: 'pizza', text: 'Pizza' }],
+        closesAt: null,
+        hideResults: false,
+      },
+      'alice',
+    )
+    const vote = await commit(
+      board,
+      { kind: 'setVote', decisionId: 'lunch', optionId: 'pizza' },
+      'carol',
+    )
+    expect(vote).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/watching/),
+    })
+    expect(snapshotFor(board, 'carol', clock).role).toBe('viewer')
+  })
+
+  it('saves deadlines, hidden results and closing, and reloads them', async () => {
+    const board = await load()
+    const steps: Array<[Operation, string]> = [
+      [
+        {
+          kind: 'createDecision',
+          decisionId: 'secret',
+          title: 'Secret ballot',
+          options: [
+            { id: 'yes', text: 'Yes' },
+            { id: 'no', text: 'No' },
+          ],
+          closesAt: clock + 60 * 60 * 1000,
+          hideResults: true,
+        },
+        'alice',
+      ],
+      [{ kind: 'setVote', decisionId: 'secret', optionId: 'yes' }, 'bob'],
+      [{ kind: 'setVote', decisionId: 'secret', optionId: 'yes' }, 'owner'],
+      [
+        { kind: 'setDecisionClosed', decisionId: 'secret', closed: true },
+        'alice',
+      ],
+    ]
+    for (const [op, actor] of steps) {
+      expect(await commit(board, op, actor), op.kind).toMatchObject({
+        ok: true,
+      })
+      expect(await reloaded()).toEqual(inMemory(board))
+    }
+
+    const reopened = await commit(
+      board,
+      { kind: 'setDecisionClosed', decisionId: 'secret', closed: false },
+      'owner',
+    )
+    expect(reopened).toMatchObject({ ok: true })
+    expect(await reloaded()).toEqual(inMemory(board))
+    expect(board.state.decisions[0]).toMatchObject({
+      closesAt: null,
+      closedAt: null,
+    })
+  })
+
+  it('keeps hidden counts accurate on the server while clients see none', async () => {
+    const board = await load()
+    await commit(
+      board,
+      {
+        kind: 'createDecision',
+        decisionId: 'secret',
+        title: 'Secret ballot',
+        options: [{ id: 'yes', text: 'Yes' }],
+        closesAt: clock + 60 * 60 * 1000,
+        hideResults: true,
+      },
+      'alice',
+    )
+    await commit(
+      board,
+      { kind: 'setVote', decisionId: 'secret', optionId: 'yes' },
+      'bob',
+    )
+
+    expect(board.state.decisions[0]?.options[0]?.votes).toBe(1)
+    const seen = snapshotFor(board, 'bob', clock).state.decisions[0]
+    expect(seen.options[0]?.votes).toBeNull()
+    expect(seen.totalVotes).toBe(1)
+    expect(
+      snapshotFor(board, 'bob', clock + 2 * 60 * 60 * 1000).state.decisions[0]
+        ?.options[0]?.votes,
+    ).toBe(1)
   })
 })

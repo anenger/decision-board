@@ -5,6 +5,7 @@ import {
   primaryKey,
   sqliteTable,
   text,
+  uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
 import { user } from './auth-schema'
 
@@ -44,8 +45,54 @@ export const decisions = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     createdAt: createdAt(),
+    /** Voting stops at this time, if set. */
+    closesAt: integer('closes_at', { mode: 'timestamp_ms' }),
+    /** Set when someone closes voting by hand. */
+    closedAt: integer('closed_at', { mode: 'timestamp_ms' }),
+    /** Per-option counts stay secret until voting closes. */
+    hideResults: integer('hide_results', { mode: 'boolean' })
+      .default(false)
+      .notNull(),
   },
   (table) => [index('decisions_board_idx').on(table.boardId)],
+)
+
+/**
+ * People invited to a board, other than its owner (boards.owner_id).
+ * Anyone else who opens the board can only watch.
+ */
+export const boardMembers = sqliteTable(
+  'board_members',
+  {
+    boardId: text('board_id')
+      .notNull()
+      .references(() => boards.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['editor', 'voter'] }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.boardId, table.userId] }),
+    index('board_members_user_idx').on(table.userId),
+  ],
+)
+
+/** One active invite link per board and role; resetting replaces the token. */
+export const boardInvites = sqliteTable(
+  'board_invites',
+  {
+    token: text('token').primaryKey(),
+    boardId: text('board_id')
+      .notNull()
+      .references(() => boards.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['editor', 'voter'] }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('board_invites_board_role_idx').on(table.boardId, table.role),
+  ],
 )
 
 export const options = sqliteTable(

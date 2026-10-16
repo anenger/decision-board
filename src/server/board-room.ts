@@ -12,6 +12,7 @@ import type {
 } from '@/lib/board-sync/protocol'
 import { db } from '@/db'
 import { LIMITS } from '@/lib/board-sync/protocol'
+import { nextDeadline, publicState } from '@/lib/board-sync/reducer'
 
 type ConnectionState = {
   viewerId: string | null
@@ -22,7 +23,8 @@ type ConnectionState = {
  * One instance per board, named by board id. It is the only writer for its
  * board: it checks each operation, saves it to D1, then broadcasts the new
  * state. D1 stays the source of truth, so the home page and server
- * rendering keep reading it directly. It also tracks who's viewing.
+ * rendering keep reading it directly. It also tracks who's viewing, and
+ * wakes itself at each voting deadline to reveal results.
  */
 export class BoardRoom extends Server<Env> {
   static override options = { hibernate: true }
@@ -35,7 +37,7 @@ export class BoardRoom extends Server<Env> {
   private queue: Promise<unknown> = Promise.resolve()
 
   override async onStart() {
-    this.board = await loadBoard(db, this.name)
+    await this.reload()
   }
 
   override getConnectionTags(_connection: Connection, ctx: ConnectionContext) {
@@ -54,21 +56,15 @@ export class BoardRoom extends Server<Env> {
 
     return this.serialize(async () => {
       // Reload so changes made outside this room, like a guest linking their
-      // account, are picked up.
-      this.board = await loadBoard(db, this.name)
+      // account or accepting an invite, are picked up.
+      await this.reload()
       if (!this.board) {
         connection.close(4404, 'Board not found')
         return
       }
 
       const people = this.people()
-      send(connection, {
-        type: 'snapshot',
-        viewerId: viewer?.id ?? null,
-        snapshot: snapshotFor(this.board, viewer?.id ?? null),
-        you: person.key,
-        people,
-      })
+      this.sendSnapshot(connection, people)
       this.broadcast(encode({ type: 'presence', people }), [connection.id])
     })
   }
@@ -101,6 +97,29 @@ export class BoardRoom extends Server<Env> {
     return this.serialize(() => this.handleOperation(connection, result.data))
   }
 
+  /** A deadline passed: everyone gets the state with results revealed. */
+  override onAlarm() {
+    return this.serialize(async () => {
+      if (!this.board) return
+      this.broadcastState()
+      await this.scheduleDeadline()
+    })
+  }
+
+  /**
+   * Called by the Worker after invites or roles change, so open tabs pick
+   * up what they're now allowed to do without a reload.
+   */
+  async refreshAccess() {
+    await this.serialize(async () => {
+      await this.reload()
+      const people = this.people()
+      for (const connection of this.getConnections<ConnectionState>()) {
+        this.sendSnapshot(connection, people)
+      }
+    })
+  }
+
   private async handleOperation(
     connection: Connection<ConnectionState>,
     { opId, op }: ClientMessage,
@@ -122,7 +141,7 @@ export class BoardRoom extends Server<Env> {
     if (!result.ok) return reject(result.reason)
 
     if (result.stateChanged) {
-      this.broadcast(encode({ type: 'state', state: this.board.state }))
+      this.broadcastState()
       const personKey = connection.state?.person.key
       if (personKey) {
         this.broadcast(
@@ -135,6 +154,9 @@ export class BoardRoom extends Server<Env> {
           [connection.id],
         )
       }
+      if (op.kind === 'createDecision' || op.kind === 'setDecisionClosed') {
+        await this.scheduleDeadline()
+      }
     }
     if (op.kind === 'setVote' || op.kind === 'deleteDecision') {
       for (const own of this.getConnections(viewerId)) {
@@ -142,6 +164,46 @@ export class BoardRoom extends Server<Env> {
       }
     }
     send(connection, { type: 'ack', opId })
+  }
+
+  private async reload() {
+    this.board = await loadBoard(db, this.name)
+    await this.scheduleDeadline()
+  }
+
+  private broadcastState() {
+    if (!this.board) return
+    this.broadcast(
+      encode({
+        type: 'state',
+        state: publicState(this.board.state, Date.now()),
+      }),
+    )
+  }
+
+  /** Wake up at the next deadline, if there is one. */
+  private async scheduleDeadline() {
+    const next = this.board ? nextDeadline(this.board.state, Date.now()) : null
+    if (next === null) {
+      await this.ctx.storage.deleteAlarm()
+    } else {
+      await this.ctx.storage.setAlarm(next)
+    }
+  }
+
+  private sendSnapshot(
+    connection: Connection<ConnectionState>,
+    people: Array<Person>,
+  ) {
+    if (!this.board || !connection.state) return
+    const { viewerId, person } = connection.state
+    send(connection, {
+      type: 'snapshot',
+      viewerId,
+      snapshot: snapshotFor(this.board, viewerId, Date.now()),
+      you: person.key,
+      people,
+    })
   }
 
   private people(leavingConnectionId?: string) {

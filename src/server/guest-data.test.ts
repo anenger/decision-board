@@ -129,6 +129,40 @@ describe('moveGuestData', () => {
     expect(await db.$count(votes)).toBe(2)
   })
 
+  it('merges board memberships, keeping the higher role', async () => {
+    const { boardMembers } = schema
+    await db.insert(boards).values([
+      { id: 'third-board', name: 'Third', ownerId: 'other' },
+      { id: 'account-board', name: 'Mine', ownerId: 'account' },
+    ])
+    await db.insert(boardMembers).values([
+      // Both are members: the guest's editor beats the account's voter.
+      { boardId: 'other-board', userId: 'guest', role: 'editor' },
+      { boardId: 'other-board', userId: 'account', role: 'voter' },
+      // The account will own the guest's board, so its membership goes.
+      { boardId: 'guest-board', userId: 'account', role: 'voter' },
+      // Only the guest is a member: it moves over.
+      { boardId: 'third-board', userId: 'guest', role: 'voter' },
+      // The account owns this board, so the guest's membership goes.
+      { boardId: 'account-board', userId: 'guest', role: 'editor' },
+    ])
+
+    await moveGuestData(db, 'guest', 'account')
+    await db.delete(user).where(eq(user.id, 'guest'))
+
+    const rows = await db
+      .select({
+        boardId: boardMembers.boardId,
+        userId: boardMembers.userId,
+        role: boardMembers.role,
+      })
+      .from(boardMembers)
+    expect(rows.sort((a, b) => a.boardId.localeCompare(b.boardId))).toEqual([
+      { boardId: 'other-board', userId: 'account', role: 'editor' },
+      { boardId: 'third-board', userId: 'account', role: 'voter' },
+    ])
+  })
+
   it('loses guest data without the move (guards the cascade assumption)', async () => {
     await db.delete(user).where(eq(user.id, 'guest'))
 

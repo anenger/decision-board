@@ -10,11 +10,17 @@ export function Popover({
   trigger,
   children,
   triggerClassName = '',
+  anchored = false,
 }: {
   label: string
   trigger: ReactNode
   children: (close: () => void) => ReactNode
   triggerClassName?: string
+  /**
+   * Always open right below the trigger. Use for triggers at the right edge
+   * of their container, like a card's menu, which can't run off-screen.
+   */
+  anchored?: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -53,9 +59,13 @@ export function Popover({
       {isOpen && (
         <div
           id={panelId}
-          // Pinned to the screen edges on phones, so a trigger in the middle
-          // of the header can't push it off-screen; anchored to it above sm.
-          className="anim-pop sticker fixed inset-x-4 top-[calc(4.25rem+env(safe-area-inset-top))] z-50 origin-top bg-white p-3 sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.6rem)] sm:right-0 sm:w-72 sm:origin-top-right"
+          // Header popovers are pinned to the screen edges on phones, so a
+          // trigger in the middle of the header can't push them off-screen.
+          className={`anim-pop sticker z-50 bg-white p-3 ${
+            anchored
+              ? 'absolute top-[calc(100%+0.4rem)] right-0 w-60 origin-top-right'
+              : 'fixed inset-x-4 top-[calc(4.25rem+env(safe-area-inset-top))] origin-top sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.6rem)] sm:right-0 sm:w-72 sm:origin-top-right'
+          }`}
         >
           {children(() => setIsOpen(false))}
         </div>

@@ -1,8 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { BoardSyncClient } from './board-client'
-import { toBoardDetails } from './reducer'
-import type { BoardSnapshot } from './protocol'
+import { nextDeadline, toBoardDetails } from './reducer'
+import type { BoardSnapshot, BoardState } from './protocol'
 import { sessionQuery } from '@/data/queries'
 import { ensureSession } from '@/server/boards'
 
@@ -36,9 +36,10 @@ export function useBoardSync(
     client.getView,
     client.getView,
   )
+  const now = useDeadlineClock(view.snapshot.state)
   const details = useMemo(
-    () => toBoardDetails(view.snapshot, view.viewerId),
-    [view.snapshot, view.viewerId],
+    () => toBoardDetails(view.snapshot, view.viewerId, now),
+    [view.snapshot, view.viewerId, now],
   )
 
   return {
@@ -52,5 +53,27 @@ export function useBoardSync(
     activity: view.activity,
     submit: client.submit,
     dismissError: client.dismissError,
+    reconnect: client.reconnect,
   }
+}
+
+/**
+ * The current time, re-rendered the moment the next deadline passes, so a
+ * question flips to closed on time even before the server's reveal arrives.
+ */
+function useDeadlineClock(state: BoardState) {
+  const [now, setNow] = useState(() => Date.now())
+  const deadline = nextDeadline(state, now)
+
+  useEffect(() => {
+    if (deadline === null) return
+    const timer = setTimeout(
+      () => setNow(Date.now()),
+      // Timers can fire early; a little slack avoids a second wake-up.
+      Math.max(0, deadline - Date.now()) + 50,
+    )
+    return () => clearTimeout(timer)
+  }, [deadline])
+
+  return now
 }

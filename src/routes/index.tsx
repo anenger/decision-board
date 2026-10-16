@@ -196,6 +196,13 @@ function BoardsHome() {
                         <span className="mt-0.5 block min-h-5 text-sm font-semibold text-ink-soft">
                           {/* Relative to the viewer's clock, so only after hydration. */}
                           {hydrated && formatRelativeDate(board.createdAt)}
+                          {board.role !== 'owner' && (
+                            <span className="ml-2 rounded-full bg-white/70 px-2 py-0.5 text-xs font-bold whitespace-nowrap text-ink">
+                              {board.role === 'editor'
+                                ? '✏️ Editor'
+                                : '🗳️ Voter'}
+                            </span>
+                          )}
                         </span>
                       </span>
                       <ArrowRight

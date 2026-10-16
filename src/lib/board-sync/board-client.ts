@@ -128,6 +128,16 @@ export class BoardSyncClient {
     this.socketViewerId = undefined
   }
 
+  /**
+   * Reconnects to pick up a new session or role, e.g. after accepting an
+   * invite link. The fresh snapshot carries the new role.
+   */
+  reconnect = () => {
+    this.isReconnecting = true
+    this.update({ status: 'connecting' })
+    this.socket?.reconnect()
+  }
+
   submit = (op: Operation) => {
     const pending = { opId: crypto.randomUUID(), op }
     this.pending = [...this.pending, pending]
@@ -303,7 +313,12 @@ export class BoardSyncClient {
       (current, { op }) =>
         // Skip changes the server will reject, such as edits to a decision
         // someone else deleted.
-        checkOperation(current.state, op, actor) === null
+        checkOperation(
+          current.state,
+          op,
+          { id: actor, role: this.confirmed.role },
+          now,
+        ) === null
           ? applyOperation(current, op, actor, now)
           : current,
       this.confirmed,

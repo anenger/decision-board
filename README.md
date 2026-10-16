@@ -42,6 +42,23 @@ Boards update live for everyone viewing them and keep working through dropped co
 
 D1 stays the source of truth, so server rendering and the boards list read it directly.
 
+## Roles and invites
+
+| Role | Can |
+| --- | --- |
+| 👑 Owner | Everything, plus invite editors, change roles and reset invite links |
+| ✏️ Editor | Ask questions, vote, add options, manage their own questions, invite voters |
+| 🗳️ Voter | Vote and add options |
+| 👀 Viewer | Watch. Anyone who opens a plain board link without being a member |
+
+The share button hands out invite links (`/boards/:id?invite=…`), one per role. Opening one makes you a member after the page loads in your browser, so link previews and crawlers never join. Invites never demote anyone, and resetting the links stops old ones from working without removing anyone. Every operation is checked against the sender's role in the board's Durable Object, and role changes reach open tabs immediately (`BoardRoom.refreshAccess`).
+
+## Deadlines and secret results
+
+A question can close at a set time, or be closed and reopened by its author or the board owner. When voting closes, the winning options get a crown (ties included).
+
+A question can also keep its results secret until voting closes. The room never sends per-option counts for those questions, only the total number of votes, so the secret can't leak through the network tab. At the deadline, a Durable Object alarm wakes the room and broadcasts the revealed results, even if nobody touches the board.
+
 ## Presence
 
 Everyone viewing a board appears as a sticker in the header. Signed-in people show their GitHub name and avatar. Guests and visitors get a made-up animal ("Sleepy Otter 🦦"), picked from a per-browser cookie so it stays the same before and after their first vote creates a guest account. The room tracks people per connection, survives hibernation, and lists each person once however many tabs they have open (`src/server/presence.ts`).
@@ -67,6 +84,7 @@ When someone else changes a question, its card wiggles and briefly shows who did
 | `src/server/auth.ts` | Better Auth config, `getViewer` / `requireViewer` |
 | `src/server/boards.ts` | Server functions for reads, creating boards and starting a session |
 | `src/server/guest-data.ts` | Moves a guest's data to their account when they sign in |
+| `src/server/board-access.ts` | Roles, invite links and members |
 
 ## Deploy
 

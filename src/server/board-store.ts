@@ -3,16 +3,26 @@ import type { BatchingDb } from '@/db/types'
 import type {
   BoardSnapshot,
   BoardState,
+  InviteRole,
   Operation,
+  Role,
   VoteMap,
 } from '@/lib/board-sync/protocol'
-import { boards, decisions, options, votes } from '@/db/schema'
-import { applyOperation, checkOperation } from '@/lib/board-sync/reducer'
+import { boardMembers, boards, decisions, options, votes } from '@/db/schema'
+import { isDecisionOpen } from '@/lib/board-sync/protocol'
+import {
+  applyOperation,
+  checkOperation,
+  publicState,
+} from '@/lib/board-sync/reducer'
 
 export type LoadedBoard = {
+  /** Full state, including counts hidden from clients. */
   state: BoardState
   /** Every user's votes: user id → their vote map. Never sent to clients. */
   votesByUser: Map<string, VoteMap>
+  /** Invited members; the owner is state.board.ownerId. */
+  members: Map<string, InviteRole>
 }
 
 export async function loadBoard(
@@ -20,46 +30,57 @@ export async function loadBoard(
   boardId: string,
 ): Promise<LoadedBoard | null> {
   const onBoard = eq(decisions.boardId, boardId)
-  const [boardRows, decisionRows, optionRows, voteRows] = (await db.batch([
-    db.select().from(boards).where(eq(boards.id, boardId)),
-    db
-      .select()
-      .from(decisions)
-      .where(onBoard)
-      .orderBy(asc(decisions.createdAt), asc(decisions.id)),
-    db
-      .select({
-        id: options.id,
-        decisionId: options.decisionId,
-        text: options.text,
-      })
-      .from(options)
-      .innerJoin(decisions, eq(decisions.id, options.decisionId))
-      .where(onBoard)
-      .orderBy(asc(options.position), asc(options.id)),
-    db
-      .select({
-        decisionId: votes.decisionId,
-        userId: votes.userId,
-        optionId: votes.optionId,
-      })
-      .from(votes)
-      .innerJoin(decisions, eq(decisions.id, votes.decisionId))
-      .where(onBoard),
-  ])) as [
-    Array<typeof boards.$inferSelect>,
-    Array<typeof decisions.$inferSelect>,
-    Array<{ id: string; decisionId: string; text: string }>,
-    Array<{ decisionId: string; userId: string; optionId: string }>,
-  ]
+  const [boardRows, decisionRows, optionRows, voteRows, memberRows] =
+    (await db.batch([
+      db.select().from(boards).where(eq(boards.id, boardId)),
+      db
+        .select()
+        .from(decisions)
+        .where(onBoard)
+        .orderBy(asc(decisions.createdAt), asc(decisions.id)),
+      db
+        .select({
+          id: options.id,
+          decisionId: options.decisionId,
+          text: options.text,
+        })
+        .from(options)
+        .innerJoin(decisions, eq(decisions.id, options.decisionId))
+        .where(onBoard)
+        .orderBy(asc(options.position), asc(options.id)),
+      db
+        .select({
+          decisionId: votes.decisionId,
+          userId: votes.userId,
+          optionId: votes.optionId,
+        })
+        .from(votes)
+        .innerJoin(decisions, eq(decisions.id, votes.decisionId))
+        .where(onBoard),
+      db
+        .select({ userId: boardMembers.userId, role: boardMembers.role })
+        .from(boardMembers)
+        .where(eq(boardMembers.boardId, boardId)),
+    ])) as [
+      Array<typeof boards.$inferSelect>,
+      Array<typeof decisions.$inferSelect>,
+      Array<{ id: string; decisionId: string; text: string }>,
+      Array<{ decisionId: string; userId: string; optionId: string }>,
+      Array<{ userId: string; role: InviteRole }>,
+    ]
 
   const board = boardRows.at(0)
   if (!board) return null
 
   const voteCounts = new Map<string, number>()
+  const decisionTotals = new Map<string, number>()
   const votesByUser = new Map<string, VoteMap>()
   for (const vote of voteRows) {
     voteCounts.set(vote.optionId, (voteCounts.get(vote.optionId) ?? 0) + 1)
+    decisionTotals.set(
+      vote.decisionId,
+      (decisionTotals.get(vote.decisionId) ?? 0) + 1,
+    )
     const userVotes = votesByUser.get(vote.userId) ?? {}
     userVotes[vote.decisionId] = vote.optionId
     votesByUser.set(vote.userId, userVotes)
@@ -78,6 +99,10 @@ export async function loadBoard(
         title: decision.title,
         createdById: decision.createdById,
         createdAt: decision.createdAt.getTime(),
+        closesAt: decision.closesAt?.getTime() ?? null,
+        closedAt: decision.closedAt?.getTime() ?? null,
+        hideResults: decision.hideResults,
+        totalVotes: decisionTotals.get(decision.id) ?? 0,
         options: optionRows
           .filter((option) => option.decisionId === decision.id)
           .map((option) => ({
@@ -88,16 +113,26 @@ export async function loadBoard(
       })),
     },
     votesByUser,
+    members: new Map(memberRows.map((m) => [m.userId, m.role])),
   }
 }
 
+export function roleOf(board: LoadedBoard, userId: string | null): Role {
+  if (userId === null) return 'viewer'
+  if (userId === board.state.board.ownerId) return 'owner'
+  return board.members.get(userId) ?? 'viewer'
+}
+
+/** What one viewer may see: their own votes and role, and no hidden counts. */
 export function snapshotFor(
   board: LoadedBoard,
   viewerId: string | null,
+  now: number,
 ): BoardSnapshot {
   return {
-    state: board.state,
+    state: publicState(board.state, now),
     myVotes: (viewerId && board.votesByUser.get(viewerId)) || {},
+    role: roleOf(board, viewerId),
   }
 }
 
@@ -116,7 +151,8 @@ export async function commitOperation(
   actorId: string,
   now: number,
 ): Promise<CommitResult> {
-  const error = checkOperation(board.state, op, actorId)
+  const role = roleOf(board, actorId)
+  const error = checkOperation(board.state, op, { id: actorId, role }, now)
   if (error) return { ok: false, reason: error }
 
   try {
@@ -127,7 +163,17 @@ export async function commitOperation(
     return { ok: false, reason: "Couldn't save that change" }
   }
 
-  const next = applyOperation(snapshotFor(board, actorId), op, actorId, now)
+  // Applied to the full state, so hidden counts stay accurate on the server.
+  const next = applyOperation(
+    {
+      state: board.state,
+      myVotes: board.votesByUser.get(actorId) ?? {},
+      role,
+    },
+    op,
+    actorId,
+    now,
+  )
   const stateChanged = next.state !== board.state
   board.state = next.state
   board.votesByUser.set(actorId, next.myVotes)
@@ -170,6 +216,8 @@ async function persistOperation(
           title: op.title,
           createdById: actorId,
           createdAt: new Date(now),
+          closesAt: op.closesAt === null ? null : new Date(op.closesAt),
+          hideResults: op.hideResults,
         }),
         db.insert(options).values(
           op.options.map((option, position) => ({
@@ -186,6 +234,23 @@ async function persistOperation(
 
     case 'renameDecision':
       await db.update(decisions).set({ title: op.title }).where(inThisBoard)
+      return
+
+    case 'setDecisionClosed':
+      if (!decision) return
+      if (op.closed) {
+        if (!isDecisionOpen(decision, now)) return
+        await db
+          .update(decisions)
+          .set({ closedAt: new Date(now) })
+          .where(inThisBoard)
+      } else {
+        // Reopening clears the deadline too, or it would close again at once.
+        await db
+          .update(decisions)
+          .set({ closedAt: null, closesAt: null })
+          .where(inThisBoard)
+      }
       return
 
     case 'deleteDecision':
