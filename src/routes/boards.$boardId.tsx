@@ -10,7 +10,7 @@ import { ArrowLeft, Check, Plus, Share2 } from 'lucide-react'
 import type { BoardSnapshot, Role } from '@/lib/board-sync/protocol'
 import type { Activity } from '@/lib/board-sync/board-client'
 import type { NewDecision } from '@/components/NewDecisionSheet'
-import { clearBoardQueue } from '@/lib/board-sync/board-client'
+import { clearBoardQueue } from '@/lib/board-sync/offline-queue'
 import DecisionCard from '@/components/DecisionCard'
 import { Burst } from '@/components/Burst'
 import {
@@ -116,6 +116,7 @@ function LiveBoard({
     activity,
     reconnect,
     deleted,
+    markDeleted,
   } = useBoardSync(boardId, initial, viewerId)
   const { board, decisions } = details
   const [isAsking, setIsAsking] = useState(false)
@@ -158,7 +159,8 @@ function LiveBoard({
   const goHome = useBoardAdminSync(boardId, board.name, pendingCount, deleted)
 
   // Whoever deleted it heads straight home; everyone else gets a moment to
-  // read what happened.
+  // read what happened. The owner's tab may hear it from its own delete
+  // request rather than the room, if its socket was down at the time.
   useEffect(() => {
     if (deleted && isDeleting) goHome()
   }, [deleted, isDeleting, goHome])
@@ -331,7 +333,7 @@ function LiveBoard({
           questionCount={decisions.length}
           voteCount={totalVotes}
           onClose={closeDelete}
-          onDeleted={goHome}
+          onDeleted={() => void markDeleted()}
         />
       )}
       {error && <SyncError message={error} onDismiss={dismissError} />}

@@ -1,4 +1,5 @@
 import {
+  mutationOptions,
   queryOptions,
   useMutation,
   useQueryClient,
@@ -14,6 +15,7 @@ import {
   resetBoardInvites,
   updateMemberRole,
 } from '@/server/boards'
+import { clearBoardQueue } from '@/lib/board-sync/offline-queue'
 
 export const sessionQuery = queryOptions({
   queryKey: ['session'],
@@ -77,9 +79,22 @@ export function useUpdateMemberRoleMutation(boardId: string) {
 
 export function useDeleteBoardMutation(boardId: string) {
   const queryClient = useQueryClient()
-  return useMutation({
+  return useMutation(deleteBoardMutationOptions(queryClient, boardId))
+}
+
+export function deleteBoardMutationOptions(
+  queryClient: QueryClient,
+  boardId: string,
+) {
+  return mutationOptions({
     mutationFn: () => deleteBoard({ data: { boardId } }),
-    onSuccess: () => forgetBoard(queryClient, boardId),
+    // Finishes before the caller's own onSuccess, which leaves the page.
+    // The room also tells this tab to clear its queue, but its socket may be
+    // down, so don't count on it.
+    onSuccess: async () => {
+      await clearBoardQueue(boardId)
+      await forgetBoard(queryClient, boardId)
+    },
   })
 }
 

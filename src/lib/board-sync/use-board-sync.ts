@@ -55,6 +55,7 @@ export function useBoardSync(
     submit: client.submit,
     dismissError: client.dismissError,
     reconnect: client.reconnect,
+    markDeleted: client.markDeleted,
   }
 }
 
