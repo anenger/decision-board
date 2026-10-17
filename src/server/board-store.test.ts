@@ -47,6 +47,7 @@ async function reloaded(boardId = 'board') {
     state: board.state,
     votes: Object.fromEntries(board.votesByUser),
     members: Object.fromEntries(board.members),
+    notifiedCloseAt: Object.fromEntries(board.notifiedCloseAt),
   }
 }
 
@@ -59,6 +60,7 @@ function inMemory(board: LoadedBoard) {
     state: board.state,
     votes: nonEmptyVotes,
     members: Object.fromEntries(board.members),
+    notifiedCloseAt: Object.fromEntries(board.notifiedCloseAt),
   }
 }
 

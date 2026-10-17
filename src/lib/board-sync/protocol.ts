@@ -135,6 +135,8 @@ export type ServerMessage =
     }
   /** The owner deleted the board. The room closes every socket after this. */
   | { type: 'deleted' }
+  /** Sent to a user's own connections when they get a new notification. */
+  | { type: 'notifications' }
 
 export const BOARD_PARTY = 'board-room'
 

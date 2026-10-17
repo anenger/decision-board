@@ -65,6 +65,14 @@ A question can close at a set time, or be closed and reopened by its author or t
 
 A question can also keep its results secret until voting closes. The room never sends per-option counts for those questions, only the total number of votes, so the secret can't leak through the network tab. At the deadline, a Durable Object alarm wakes the room and broadcasts the revealed results, even if nobody touches the board.
 
+## Notifications
+
+When voting on a question closes, at its deadline or by hand, everyone on the board (the owner and invited members) gets a notification, except the person who closed it. The 🔔 in the header shows the unread count and opens the list. It refreshes when the window regains focus, and updates immediately when the close happens on a board you have open.
+
+- **Written with the close.** The board's room writes notifications in the same D1 batch that closes the question, so the room stays the only writer of a board's contents. Recipients are read from D1 in that same statement, so someone removed from the board stops being notified even if the room hasn't caught up yet.
+- **Exactly once per close.** Each question records the close its members were last told about (`decisions.notified_close_at`), and a unique index covers each person and close. A retried alarm or repeated message adds nothing. Reopening and closing again is a new close and notifies again.
+- **Never ahead of the board.** A notification only points at the question. Its text is worked out when you read it, and it names the winner only while that close is still the current one. Reopen a secret question and its notification goes back to just "Voting closed on…".
+
 ## Presence
 
 Everyone viewing a board appears as a sticker in the header. Signed-in people show their GitHub name and avatar. Guests and visitors get a made-up animal ("Sleepy Otter 🦦"), picked from a per-browser cookie so it stays the same before and after their first vote creates a guest account. The room tracks people per connection, survives hibernation, and lists each person once however many tabs they have open (`src/server/presence.ts`).
@@ -91,6 +99,8 @@ When someone else changes a question, its card wiggles and briefly shows who did
 | `src/server/boards.ts` | Server functions for reads, creating boards and starting a session |
 | `src/server/guest-data.ts` | Moves a guest's data to their account when they sign in |
 | `src/server/board-access.ts` | Roles, invite links and members |
+| `src/server/notifications.ts` | Writes close notifications and reads the viewer's own |
+| `src/components/NotificationBell.tsx` | The header bell and its list |
 
 ## Deploy
 

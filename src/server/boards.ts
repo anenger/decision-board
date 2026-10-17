@@ -14,8 +14,14 @@ import {
 } from './board-access'
 import { loadBoard, snapshotFor } from './board-store'
 import { getOrCreateDeviceSeed } from './device'
+import {
+  listNotifications,
+  markAllNotificationsRead,
+  markNotificationsRead,
+} from './notifications'
 import type { BoardMember } from './board-access'
 import type { BoardSummary } from '@/lib/board'
+import type { NotificationList } from '@/lib/notifications'
 import type { BoardSnapshot, InviteRole, Role } from '@/lib/board-sync/protocol'
 import { db } from '@/db'
 import { boards } from '@/db/schema'
@@ -52,6 +58,34 @@ export const listMyBoards = createServerFn({ method: 'GET' }).handler(
     return viewer ? listBoardsFor(db, viewer.id) : []
   },
 )
+
+/** The viewer's own notifications. Reads never create a guest account. */
+export const listMyNotifications = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<NotificationList> => {
+    const viewer = await getViewer()
+    return viewer
+      ? listNotifications(db, viewer.id, Date.now())
+      : { items: [], unreadCount: 0 }
+  },
+)
+
+/** Marks the given notifications read, or all of them without `ids`. */
+export const markMyNotificationsRead = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      ids: z.array(z.string().min(1).max(64)).min(1).max(100).optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    // Only ever the signed-in viewer's own rows; ids that aren't theirs
+    // match nothing.
+    const viewer = await requireViewer()
+    if (data.ids) {
+      await markNotificationsRead(db, viewer.id, data.ids, Date.now())
+    } else {
+      await markAllNotificationsRead(db, viewer.id, Date.now())
+    }
+  })
 
 /** Initial board contents for server rendering, before the socket connects. */
 export const getBoard = createServerFn({ method: 'GET' })
