@@ -51,6 +51,8 @@ type BoardSyncOptions = {
   viewerId: string | null
   /** Creates a (guest) session if needed and returns the user id. */
   ensureViewer: () => Promise<string>
+  /** The viewer just got a new notification. */
+  onNotification: () => void
 }
 
 /** Stands in for the viewer in optimistic updates before they have an account. */
@@ -187,6 +189,9 @@ export class BoardSyncClient {
       case 'activity':
         this.recordActivity(message)
         break
+      case 'notifications':
+        this.options.onNotification()
+        return
     }
     this.update({})
   }

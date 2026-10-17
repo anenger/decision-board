@@ -5,6 +5,7 @@ import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Loader } from '@/components/Loader'
 import { AccountMenu } from '@/components/AccountMenu'
+import { NotificationBell } from '@/components/NotificationBell'
 import { Mascot } from '@/components/Mascot'
 import {
   boardQueries,
@@ -12,29 +13,8 @@ import {
   useCreateBoardMutation,
 } from '@/data/queries'
 import { hashString } from '@/lib/board-sync/persona'
+import { formatRelativeDate } from '@/lib/time'
 import { useHydrated } from '@/lib/use-hydrated'
-
-const relativeFormatter = new Intl.RelativeTimeFormat('en', {
-  numeric: 'auto',
-})
-
-const dateFormatter = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
-})
-
-function formatRelativeDate(timestamp: number) {
-  const minutes = Math.floor((Date.now() - timestamp) / 60_000)
-  const hours = Math.floor(minutes / 60)
-  const days = Math.floor(hours / 24)
-
-  if (days > 30) return dateFormatter.format(new Date(timestamp))
-  if (days > 0) return relativeFormatter.format(-days, 'day')
-  if (hours > 0) return relativeFormatter.format(-hours, 'hour')
-  if (minutes > 0) return relativeFormatter.format(-minutes, 'minute')
-  return 'just now'
-}
 
 const TILE_COLORS = [
   'bg-bubblegum',
@@ -91,7 +71,10 @@ function BoardsHome() {
             decision board
           </span>
         </Link>
-        <AccountMenu />
+        <div className="flex items-center gap-1">
+          <NotificationBell />
+          <AccountMenu />
+        </div>
       </header>
 
       <main className="mx-auto max-w-5xl px-4 sm:px-5">

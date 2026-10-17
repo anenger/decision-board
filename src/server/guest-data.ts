@@ -1,20 +1,25 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, exists, inArray } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/sqlite-core'
 import type { BatchingDb } from '@/db/types'
 import * as schema from '@/db/schema'
 
 /**
- * Moves a guest's boards, memberships, decisions, options and votes to the
+ * Moves a guest's boards, memberships, decisions, options, votes and
+ * notifications to the
  * account they signed in with. Must run before Better Auth deletes the guest,
  * whose rows would otherwise be removed by cascading deletes. Where both
  * accounts voted on the same decision, the signed-in account's vote wins;
- * where both are members of a board, the higher role wins.
+ * where both are members of a board, the higher role wins; where both were
+ * notified about the same close, the account's notification is kept.
  */
 export async function moveGuestData(
   db: BatchingDb,
   guestId: string,
   userId: string,
 ) {
-  const { boardMembers, boards, decisions, options, votes } = schema
+  const { boardMembers, boards, decisions, notifications, options, votes } =
+    schema
+  const accountCopy = alias(notifications, 'account_copy')
   const decisionsUserVotedOn = db
     .select({ decisionId: votes.decisionId })
     .from(votes)
@@ -94,5 +99,30 @@ export async function moveGuestData(
       .update(options)
       .set({ createdById: userId })
       .where(eq(options.createdById, guestId)),
+
+    // A close both accounts were told about would collide on the unique
+    // index, so drop the guest's copy first.
+    db.delete(notifications).where(
+      and(
+        eq(notifications.userId, guestId),
+        exists(
+          db
+            .select({ id: accountCopy.id })
+            .from(accountCopy)
+            .where(
+              and(
+                eq(accountCopy.userId, userId),
+                eq(accountCopy.decisionId, notifications.decisionId),
+                eq(accountCopy.kind, notifications.kind),
+                eq(accountCopy.closedAt, notifications.closedAt),
+              ),
+            ),
+        ),
+      ),
+    ),
+    db
+      .update(notifications)
+      .set({ userId })
+      .where(eq(notifications.userId, guestId)),
   ])
 }
