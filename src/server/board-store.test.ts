@@ -372,6 +372,7 @@ describe('renaming a board', () => {
       ok: true,
       stateChanged: true,
       myVotes: {},
+      notified: [],
     })
     expect(await reloaded()).toEqual(inMemory(board))
     expect(board.state.board.name).toBe('Team retreat')

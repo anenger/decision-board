@@ -92,6 +92,7 @@ function connect(
     initial,
     viewerId,
     ensureViewer,
+    onNotification: () => {},
   })
   client.start()
   const socket = sockets.at(-1)

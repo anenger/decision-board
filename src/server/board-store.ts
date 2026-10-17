@@ -305,9 +305,9 @@ async function persistOperation(
   const boardId = before.board.id
 
   if (op.kind === 'renameBoard') {
-    if (before.board.name === op.name) return
+    if (before.board.name === op.name) return null
     await db.update(boards).set({ name: op.name }).where(eq(boards.id, boardId))
-    return
+    return null
   }
 
   const decision = before.decisions.find((d) => d.id === op.decisionId)
