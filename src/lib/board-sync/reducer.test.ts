@@ -391,3 +391,63 @@ describe('toBoardDetails', () => {
     ).toBe(false)
   })
 })
+
+describe('renameBoard', () => {
+  const rename = (name: string): Operation => ({ kind: 'renameBoard', name })
+
+  it('is for the owner only', () => {
+    expect(
+      checkOperation(
+        makeSnapshot().state,
+        rename('New'),
+        as('owner', 'owner'),
+        NOW,
+      ),
+    ).toBeNull()
+    for (const role of ['editor', 'voter', 'viewer'] as const) {
+      expect(
+        checkOperation(makeSnapshot().state, rename('New'), as('x', role), NOW),
+        role,
+      ).not.toBeNull()
+    }
+  })
+
+  it('needs a trimmed, non-empty name of at most 100 characters', () => {
+    const check = (name: string) =>
+      checkOperation(
+        makeSnapshot().state,
+        rename(name),
+        as('owner', 'owner'),
+        NOW,
+      )
+    expect(check('a'.repeat(100))).toBeNull()
+    expect(check('Team offsite 🏕️')).toBeNull()
+    expect(check('')).toMatch(/name/)
+    expect(check('  padded ')).toMatch(/spaces/)
+    expect(check('a'.repeat(101))).toMatch(/100/)
+  })
+
+  it('sets the name, so replaying it changes nothing', () => {
+    const before = makeSnapshot({}, 'owner')
+    const once = apply(before, rename('Retreat'), 'owner')
+    const twice = apply(once, rename('Retreat'), 'owner')
+    expect(once.state.board.name).toBe('Retreat')
+    expect(once.state.decisions).toBe(before.state.decisions)
+    // Same object, so the room knows not to broadcast or write again.
+    expect(twice).toBe(once)
+  })
+
+  it('shows rename and delete to the owner only', () => {
+    const snapshot = makeSnapshot()
+    expect(
+      toBoardDetails({ ...snapshot, role: 'owner' }, 'owner', NOW).board
+        .canManage,
+    ).toBe(true)
+    for (const role of ['editor', 'voter', 'viewer'] as const) {
+      expect(
+        toBoardDetails({ ...snapshot, role }, 'x', NOW).board.canManage,
+        role,
+      ).toBe(false)
+    }
+  })
+})

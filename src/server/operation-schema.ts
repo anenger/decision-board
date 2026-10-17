@@ -1,9 +1,11 @@
 import { z } from 'zod'
 import type { ClientMessage, Operation } from '@/lib/board-sync/protocol'
+import { LIMITS } from '@/lib/board-sync/protocol'
 
 const id = z.uuid()
 const title = z.string().trim().min(1).max(200)
 const optionText = z.string().trim().min(1).max(200)
+export const boardName = z.string().trim().min(1).max(LIMITS.boardNameLength)
 
 const operationSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -35,6 +37,7 @@ const operationSchema = z.discriminatedUnion('kind', [
     decisionId: id,
     closed: z.boolean(),
   }),
+  z.object({ kind: z.literal('renameBoard'), name: boardName }),
 ])
 
 export const clientMessageSchema = z.object({

@@ -200,6 +200,13 @@ async function persistOperation(
   now: number,
 ) {
   const boardId = before.board.id
+
+  if (op.kind === 'renameBoard') {
+    if (before.board.name === op.name) return
+    await db.update(boards).set({ name: op.name }).where(eq(boards.id, boardId))
+    return
+  }
+
   const decision = before.decisions.find((d) => d.id === op.decisionId)
   const inThisBoard = and(
     eq(decisions.id, op.decisionId),
@@ -295,4 +302,35 @@ async function persistOperation(
       return
     }
   }
+}
+
+export type DeleteResult = { ok: true } | { ok: false; reason: string }
+
+/**
+ * Deletes a board and everything on it, if `actorId` owns it. Questions,
+ * members and invite links go with it through the schema's cascading
+ * deletes (options and votes cascade from questions); D1 enforces foreign
+ * keys. Only the board's room calls this, so it stays the only writer.
+ */
+export async function deleteBoard(
+  db: BatchingDb,
+  boardId: string,
+  actorId: string,
+): Promise<DeleteResult> {
+  const board = await db
+    .select({ ownerId: boards.ownerId })
+    .from(boards)
+    .where(eq(boards.id, boardId))
+    .get()
+  if (!board) return { ok: false, reason: 'This board was already deleted' }
+
+  // Editors and voters can't delete it either (see canManageBoard).
+  if (board.ownerId !== actorId) {
+    return { ok: false, reason: 'Only the board owner can delete it' }
+  }
+
+  await db
+    .delete(boards)
+    .where(and(eq(boards.id, boardId), eq(boards.ownerId, actorId)))
+  return { ok: true }
 }

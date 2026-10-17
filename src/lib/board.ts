@@ -1,4 +1,4 @@
-import { hasRole } from './board-sync/protocol'
+import { LIMITS, hasRole } from './board-sync/protocol'
 import type { Role } from './board-sync/protocol'
 
 export type BoardSummary = {
@@ -15,6 +15,8 @@ export type BoardView = {
   role: Role
   /** Editors and owners can ask new questions. */
   canAsk: boolean
+  /** Only the owner can rename or delete the board. */
+  canManage: boolean
 }
 
 export type OptionView = {
@@ -61,4 +63,23 @@ export function canManageDecision(
       viewerId === decision.createdById &&
       hasRole(role, 'voter'))
   )
+}
+
+/** Renaming and deleting a board are for its owner alone. */
+export function canManageBoard(role: Role) {
+  return role === 'owner'
+}
+
+/**
+ * Why `name` can't be a board's name, or null if it can. Names arrive
+ * trimmed: the server's message schema trims them and the UI trims before
+ * sending.
+ */
+export function boardNameError(name: string): string | null {
+  if (name.trim() !== name) return 'Board names can’t start or end with spaces'
+  if (name.length === 0) return 'Give the board a name'
+  if (name.length > LIMITS.boardNameLength) {
+    return `Keep board names to ${LIMITS.boardNameLength} characters or fewer`
+  }
+  return null
 }

@@ -7,7 +7,7 @@ import type {
   Role,
 } from './protocol'
 import type { BoardDetails } from '@/lib/board'
-import { canManageDecision } from '@/lib/board'
+import { boardNameError, canManageBoard, canManageDecision } from '@/lib/board'
 
 export type Actor = { id: string; role: Role }
 
@@ -24,6 +24,13 @@ export function checkOperation(
 ): string | null {
   if (actor.role === 'viewer') {
     return "You're watching this board. Ask for an invite link to join in."
+  }
+
+  if (op.kind === 'renameBoard') {
+    if (!canManageBoard(actor.role)) {
+      return 'Only the board owner can rename it'
+    }
+    return boardNameError(op.name)
   }
 
   const decision = findDecision(state, op.decisionId)
@@ -96,6 +103,16 @@ export function applyOperation(
   now: number,
 ): BoardSnapshot {
   const { state, myVotes } = snapshot
+
+  if (op.kind === 'renameBoard') {
+    // Sets rather than edits the name, so a replay changes nothing.
+    if (state.board.name === op.name) return snapshot
+    return {
+      ...snapshot,
+      state: { ...state, board: { ...state.board, name: op.name } },
+    }
+  }
+
   const decision = findDecision(state, op.decisionId)
 
   switch (op.kind) {
@@ -233,6 +250,7 @@ export function toBoardDetails(
       createdAt: state.board.createdAt,
       role,
       canAsk: hasRole(role, 'editor'),
+      canManage: canManageBoard(role),
     },
     decisions: state.decisions.map((decision) => {
       const isOpen = isDecisionOpen(decision, now)

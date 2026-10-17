@@ -1,10 +1,13 @@
 import {
+  mutationOptions,
   queryOptions,
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import {
   createBoard,
+  deleteBoard,
   getBoard,
   getBoardSharing,
   getSessionInfo,
@@ -12,6 +15,7 @@ import {
   resetBoardInvites,
   updateMemberRole,
 } from '@/server/boards'
+import { clearBoardQueue } from '@/lib/board-sync/offline-queue'
 
 export const sessionQuery = queryOptions({
   queryKey: ['session'],
@@ -71,4 +75,35 @@ export function useUpdateMemberRoleMutation(boardId: string) {
     onSettled: () =>
       queryClient.invalidateQueries(boardQueries.sharing(boardId)),
   })
+}
+
+export function useDeleteBoardMutation(boardId: string) {
+  const queryClient = useQueryClient()
+  return useMutation(deleteBoardMutationOptions(queryClient, boardId))
+}
+
+export function deleteBoardMutationOptions(
+  queryClient: QueryClient,
+  boardId: string,
+) {
+  return mutationOptions({
+    mutationFn: () => deleteBoard({ data: { boardId } }),
+    // Finishes before the caller's own onSuccess, which leaves the page.
+    // The room also tells this tab to clear its queue, but its socket may be
+    // down, so don't count on it.
+    onSuccess: async () => {
+      await clearBoardQueue(boardId)
+      await forgetBoard(queryClient, boardId)
+    },
+  })
+}
+
+/**
+ * Drops a deleted board from the cache, so "Your boards" no longer lists it
+ * and its link loads fresh (and finds nothing) instead of the old copy.
+ */
+export function forgetBoard(queryClient: QueryClient, boardId: string) {
+  queryClient.removeQueries(boardQueries.detail(boardId))
+  queryClient.removeQueries(boardQueries.sharing(boardId))
+  return queryClient.invalidateQueries(boardQueries.mine())
 }

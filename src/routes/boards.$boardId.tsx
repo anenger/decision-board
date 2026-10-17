@@ -10,16 +10,23 @@ import { ArrowLeft, Check, Plus, Share2 } from 'lucide-react'
 import type { BoardSnapshot, Role } from '@/lib/board-sync/protocol'
 import type { Activity } from '@/lib/board-sync/board-client'
 import type { NewDecision } from '@/components/NewDecisionSheet'
+import { clearBoardQueue } from '@/lib/board-sync/offline-queue'
 import DecisionCard from '@/components/DecisionCard'
 import { Burst } from '@/components/Burst'
+import {
+  BoardDeleted,
+  BoardTitle,
+  DeleteBoardSheet,
+} from '@/components/BoardAdmin'
 import { NewDecisionSheet } from '@/components/NewDecisionSheet'
 import { ShareSheet } from '@/components/ShareSheet'
 import { Loader } from '@/components/Loader'
+import { NotFound } from '@/components/NotFound'
 import { AccountMenu } from '@/components/AccountMenu'
 import { Mascot } from '@/components/Mascot'
 import { PresenceStack } from '@/components/PresenceStack'
 import { SyncError, SyncStatus } from '@/components/SyncStatus'
-import { boardQueries, sessionQuery } from '@/data/queries'
+import { boardQueries, forgetBoard, sessionQuery } from '@/data/queries'
 import { useBoardSync } from '@/lib/board-sync/use-board-sync'
 import { hasRole } from '@/lib/board-sync/protocol'
 import { useHydrated } from '@/lib/use-hydrated'
@@ -44,7 +51,18 @@ export const Route = createFileRoute('/boards/$boardId')({
     }
   },
   component: BoardRoute,
+  notFoundComponent: BoardNotFound,
 })
+
+/** A deleted board, or a mistyped link. Invite links land here too. */
+function BoardNotFound() {
+  const { boardId } = Route.useParams()
+  // A tab closed while offline may have left changes queued for this board.
+  useEffect(() => {
+    void clearBoardQueue(boardId)
+  }, [boardId])
+  return <NotFound />
+}
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -97,13 +115,16 @@ function LiveBoard({
     you,
     activity,
     reconnect,
+    deleted,
+    markDeleted,
   } = useBoardSync(boardId, initial, viewerId)
   const { board, decisions } = details
   const [isAsking, setIsAsking] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const invite = useInvite(boardId, reconnect)
   const canInvite = hasRole(board.role, 'editor')
-  const titleRef = useRef<HTMLHeadingElement>(null)
+  const titleRef = useRef<HTMLDivElement>(null)
   const titleOffscreen = useIsOffscreen(titleRef)
   const hydrated = useHydrated()
 
@@ -134,6 +155,17 @@ function LiveBoard({
   )
   const closeSheet = useCallback(() => setIsAsking(false), [])
   const closeShare = useCallback(() => setIsSharing(false), [])
+  const closeDelete = useCallback(() => setIsDeleting(false), [])
+  const goHome = useBoardAdminSync(boardId, board.name, pendingCount, deleted)
+
+  // Whoever deleted it heads straight home; everyone else gets a moment to
+  // read what happened. The owner's tab may hear it from its own delete
+  // request rather than the room, if its socket was down at the time.
+  useEffect(() => {
+    if (deleted && isDeleting) goHome()
+  }, [deleted, isDeleting, goHome])
+
+  if (deleted) return <BoardDeleted name={board.name} onGoHome={goHome} />
 
   return (
     <div className="min-h-dvh pb-28 sm:pb-16">
@@ -183,12 +215,18 @@ function LiveBoard({
       </header>
 
       <main className="mx-auto max-w-5xl px-4 pt-7 sm:px-5 sm:pt-10">
-        <h1
+        {/* Raised while its menu is open, above the chips row below it. */}
+        <div
           ref={titleRef}
-          className="anim-rise text-[2rem] leading-[1.1] font-semibold wrap-anywhere sm:text-5xl"
+          className="anim-rise relative has-[[aria-expanded=true]]:z-20"
         >
-          {board.name}
-        </h1>
+          <BoardTitle
+            name={board.name}
+            canManage={board.canManage}
+            onRename={(name) => submit({ kind: 'renameBoard', name })}
+            onDelete={() => setIsDeleting(true)}
+          />
+        </div>
         <div className="anim-rise mt-4 flex flex-wrap items-center gap-2 [animation-delay:60ms]">
           <SyncStatus status={status} pendingCount={pendingCount} />
           <Chip>{ROLE_CHIPS[board.role]}</Chip>
@@ -288,9 +326,49 @@ function LiveBoard({
           onClose={closeShare}
         />
       )}
+      {isDeleting && board.canManage && (
+        <DeleteBoardSheet
+          boardId={boardId}
+          name={board.name}
+          questionCount={decisions.length}
+          voteCount={totalVotes}
+          onClose={closeDelete}
+          onDeleted={() => void markDeleted()}
+        />
+      )}
       {error && <SyncError message={error} onDismiss={dismissError} />}
     </div>
   )
+}
+
+/**
+ * Keeps cached board lists in step with renames and deletes, from this tab
+ * or any other, and returns a way home.
+ */
+function useBoardAdminSync(
+  boardId: string,
+  name: string,
+  pendingCount: number,
+  deleted: boolean,
+) {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const savedName = useRef(name)
+
+  // Waits for pending changes to be confirmed, so the refetch sees the new
+  // name in the database rather than racing the save.
+  useEffect(() => {
+    if (pendingCount > 0 || savedName.current === name) return
+    savedName.current = name
+    void queryClient.invalidateQueries(boardQueries.mine())
+    void queryClient.invalidateQueries(boardQueries.detail(boardId))
+  }, [boardId, name, pendingCount, queryClient])
+
+  useEffect(() => {
+    if (deleted) void forgetBoard(queryClient, boardId)
+  }, [boardId, deleted, queryClient])
+
+  return useCallback(() => navigate({ to: '/', replace: true }), [navigate])
 }
 
 /** True once the element has scrolled up under the sticky header. */

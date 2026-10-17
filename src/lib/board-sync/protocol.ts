@@ -77,6 +77,8 @@ export type Operation =
   | { kind: 'setVote'; decisionId: string; optionId: string | null }
   /** Closes voting now, or reopens it with no deadline. */
   | { kind: 'setDecisionClosed'; decisionId: string; closed: boolean }
+  /** Sets the board's name. Owner only. */
+  | { kind: 'renameBoard'; name: string }
 
 export type ClientMessage = {
   type: 'op'
@@ -131,10 +133,13 @@ export type ServerMessage =
       decisionId: string
       kind: ActivityKind
     }
+  /** The owner deleted the board. The room closes every socket after this. */
+  | { type: 'deleted' }
 
 export const BOARD_PARTY = 'board-room'
 
 export const LIMITS = {
+  boardNameLength: 100,
   decisionsPerBoard: 100,
   optionsPerDecision: 50,
   messageBytes: 32_000,

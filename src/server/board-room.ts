@@ -1,10 +1,15 @@
 import { Server } from 'partyserver'
-import { commitOperation, loadBoard, snapshotFor } from './board-store'
+import {
+  commitOperation,
+  deleteBoard,
+  loadBoard,
+  snapshotFor,
+} from './board-store'
 import { clientMessageSchema } from './operation-schema'
 import { personFor, presenceList } from './presence'
 import { readViewerHeaders } from './viewer-headers'
 import type { Connection, ConnectionContext, WSMessage } from 'partyserver'
-import type { LoadedBoard } from './board-store'
+import type { DeleteResult, LoadedBoard } from './board-store'
 import type {
   ClientMessage,
   Person,
@@ -13,6 +18,9 @@ import type {
 import { db } from '@/db'
 import { LIMITS } from '@/lib/board-sync/protocol'
 import { nextDeadline, publicState } from '@/lib/board-sync/reducer'
+
+/** Close code for a board that doesn't exist, or was just deleted. */
+const BOARD_NOT_FOUND_CODE = 4404
 
 type ConnectionState = {
   viewerId: string | null
@@ -59,7 +67,7 @@ export class BoardRoom extends Server<Env> {
       // account or accepting an invite, are picked up.
       await this.reload()
       if (!this.board) {
-        connection.close(4404, 'Board not found')
+        connection.close(BOARD_NOT_FOUND_CODE, 'Board not found')
         return
       }
 
@@ -120,6 +128,29 @@ export class BoardRoom extends Server<Env> {
     })
   }
 
+  /**
+   * Called by the Worker when someone asks to delete the board. Runs in the
+   * change queue, so no operation can land after the delete. Open tabs are
+   * told, then disconnected; a deleted board loads as null, so later
+   * connections and operations are refused rather than bringing it back.
+   */
+  async deleteBoard(actorId: string): Promise<DeleteResult> {
+    return this.serialize(async () => {
+      const result = await deleteBoard(db, this.name, actorId)
+      if (!result.ok) return result
+
+      this.board = null
+      // No deadline alarm or stored state outlives the board.
+      await this.ctx.storage.deleteAlarm()
+      await this.ctx.storage.deleteAll()
+      this.broadcast(encode({ type: 'deleted' }))
+      for (const connection of this.getConnections()) {
+        connection.close(BOARD_NOT_FOUND_CODE, 'Board deleted')
+      }
+      return result
+    })
+  }
+
   private async handleOperation(
     connection: Connection<ConnectionState>,
     { opId, op }: ClientMessage,
@@ -143,7 +174,8 @@ export class BoardRoom extends Server<Env> {
     if (result.stateChanged) {
       this.broadcastState()
       const personKey = connection.state?.person.key
-      if (personKey) {
+      // The new name speaks for itself; activity is for question cards.
+      if (personKey && op.kind !== 'renameBoard') {
         this.broadcast(
           encode({
             type: 'activity',

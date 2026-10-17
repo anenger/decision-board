@@ -34,7 +34,7 @@ bun run build
 Boards update live for everyone viewing them and keep working through dropped connections. There's no CRDT library: the client sends small operations and one server process per board has the final say. Linear and Figma work the same way.
 
 - **One room per board.** Each board has a `BoardRoom` Durable Object, built on [PartyServer](https://github.com/cloudflare/partykit), at `/parties/board-room/:boardId`. Hibernatable WebSockets mean idle boards cost nothing.
-- **Operations, not documents.** The browser sends `createDecision`, `renameDecision`, `deleteDecision`, `addOption` and `setVote`, with ids it generates itself. Votes *set* a choice rather than toggling it, so every operation can be replayed safely after a dropped connection.
+- **Operations, not documents.** The browser sends `createDecision`, `renameDecision`, `deleteDecision`, `addOption`, `setVote`, `setDecisionClosed` and `renameBoard`, with ids it generates itself. Votes and names are *set* rather than toggled, so every operation can be replayed safely after a dropped connection.
 - **Instant updates, server confirmation.** The client shows the last confirmed server state with its pending operations applied on top, using the same reducer the server runs (`src/lib/board-sync/reducer.ts`). When the server acknowledges or rejects an operation, it leaves the queue.
 - **The server checks every change.** The room validates each message, checks permissions with the same rule the UI uses, saves to D1, then broadcasts the new state. Changes run one at a time per board, so a check and its write can't interleave with another change.
 - **Offline.** Pending operations are saved in IndexedDB and resent when the socket reconnects, including after the tab is closed and reopened. The header shows the connection state and how many changes are waiting.
@@ -46,12 +46,18 @@ D1 stays the source of truth, so server rendering and the boards list read it di
 
 | Role | Can |
 | --- | --- |
-| 👑 Owner | Everything, plus invite editors, change roles and reset invite links |
+| 👑 Owner | Everything, plus invite editors, change roles, reset invite links, and rename or delete the board |
 | ✏️ Editor | Ask questions, vote, add options, manage their own questions, invite voters |
 | 🗳️ Voter | Vote and add options |
 | 👀 Viewer | Watch. Anyone who opens a plain board link without being a member |
 
 The share button hands out invite links (`/boards/:id?invite=…`), one per role. Opening one makes you a member after the page loads in your browser, so link previews and crawlers never join. Invites never demote anyone, and resetting the links stops old ones from working without removing anyone. Every operation is checked against the sender's role in the board's Durable Object, and role changes reach open tabs immediately (`BoardRoom.refreshAccess`).
+
+## Renaming and deleting a board
+
+The owner's ⋯ menu next to the board's title renames it in place or deletes it. Renaming is an ordinary `renameBoard` operation, so open tabs and "Your boards" pick up the new name.
+
+Deleting asks the owner to type the board's name first. It goes through the board's room too (`BoardRoom.deleteBoard`), so it can't interleave with other changes. The room deletes the board, and the schema's cascades remove its questions, options, votes, members and invite links. It then clears its deadline alarm and storage, tells every open tab, and closes their sockets. Those tabs show "This board was deleted", drop any queued offline changes, and head home. Afterwards the board's links and invite links show the usual not-found page.
 
 ## Deadlines and secret results
 
