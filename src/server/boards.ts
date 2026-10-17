@@ -18,6 +18,7 @@ import {
   listNotifications,
   markAllNotificationsRead,
   markNotificationsRead,
+  markReadInputSchema,
 } from './notifications'
 import type { BoardMember } from './board-access'
 import type { BoardSummary } from '@/lib/board'
@@ -71,11 +72,7 @@ export const listMyNotifications = createServerFn({ method: 'GET' }).handler(
 
 /** Marks the given notifications read, or all of them without `ids`. */
 export const markMyNotificationsRead = createServerFn({ method: 'POST' })
-  .inputValidator(
-    z.object({
-      ids: z.array(z.string().min(1).max(64)).min(1).max(100).optional(),
-    }),
-  )
+  .inputValidator(markReadInputSchema)
   .handler(async ({ data }) => {
     // Only ever the signed-in viewer's own rows; ids that aren't theirs
     // match nothing.

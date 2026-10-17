@@ -1,4 +1,15 @@
-import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm'
+import { z } from 'zod'
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core'
 import type { BatchingDb } from '@/db/types'
 import type { DecisionState } from '@/lib/board-sync/protocol'
@@ -86,83 +97,98 @@ export function insertCloseNotifications(
 }
 
 /**
- * The viewer's latest notifications, worked out against the board as it is
- * now: the winner is only included while the close it announces is still in
- * effect, which is exactly when the board shows the results.
+ * The viewer's latest notifications on boards they're still on, worked out
+ * against the board as it is now. A winner is only included while the close
+ * it announces is still in effect, which is exactly when the board shows the
+ * results. That check and the vote counts are read by the same statement, so
+ * a reopen can't slip in between and reveal counts that are secret again.
  */
 export async function listNotifications(
   db: BatchingDb,
   userId: string,
   now: number,
 ): Promise<NotificationList> {
-  const mine = eq(notifications.userId, userId)
-  const [rows, unread] = (await db.batch([
+  // Removed members keep their rows, but only see them again if re-added.
+  const mine = and(
+    eq(notifications.userId, userId),
+    or(
+      eq(boards.ownerId, userId),
+      exists(
+        db
+          .select({ userId: boardMembers.userId })
+          .from(boardMembers)
+          .where(
+            and(
+              eq(boardMembers.boardId, notifications.boardId),
+              eq(boardMembers.userId, userId),
+            ),
+          ),
+      ),
+    ),
+  )
+  const latest = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .innerJoin(boards, eq(boards.id, notifications.boardId))
+    .where(mine)
+    .orderBy(desc(notifications.createdAt), desc(notifications.id))
+    .limit(NOTIFICATION_LIST_LIMIT)
+  // Same rule as closeTimeOf: closed by hand, or the deadline has passed.
+  const closeIsCurrent = sql`coalesce(${decisions.closedAt}, case when ${decisions.closesAt} <= ${now} then ${decisions.closesAt} end) = ${notifications.closedAt}`
+
+  // A batch is one transaction, so all three see the same moment.
+  const [rows, counts, unread] = (await db.batch([
+    // D1 returns rows by position and mixes up columns that share a name, so
+    // no select here may repeat one (id, closed_at, ...).
     db
       .select({
         id: notifications.id,
         kind: notifications.kind,
-        closedAt: notifications.closedAt,
         createdAt: notifications.createdAt,
         readAt: notifications.readAt,
         boardId: notifications.boardId,
         boardName: boards.name,
         decisionId: notifications.decisionId,
         title: decisions.title,
-        // D1 returns rows by position and mixes up columns that share a
-        // name, so nothing selected here may repeat one (closed_at, id).
-        decisionClosedAt: sql`${decisions.closedAt}`
-          .mapWith(decisions.closedAt)
-          .as('decision_closed_at'),
-        decisionClosesAt: decisions.closesAt,
       })
       .from(notifications)
       .innerJoin(decisions, eq(decisions.id, notifications.decisionId))
       .innerJoin(boards, eq(boards.id, notifications.boardId))
-      .where(mine)
-      .orderBy(desc(notifications.createdAt), desc(notifications.id))
-      .limit(NOTIFICATION_LIST_LIMIT),
+      .where(inArray(notifications.id, latest))
+      .orderBy(desc(notifications.createdAt), desc(notifications.id)),
+    // Per-option counts, only for notifications whose close is current.
+    db
+      .select({
+        notificationId: notifications.id,
+        text: options.text,
+        votes: sql<number>`count(${votes.userId})`,
+      })
+      .from(notifications)
+      .innerJoin(decisions, eq(decisions.id, notifications.decisionId))
+      .innerJoin(options, eq(options.decisionId, notifications.decisionId))
+      .leftJoin(votes, eq(votes.optionId, options.id))
+      .where(and(inArray(notifications.id, latest), closeIsCurrent))
+      .groupBy(notifications.id, options.id)
+      .orderBy(options.position, options.id),
     db
       .select({ count: sql<number>`count(*)` })
       .from(notifications)
+      .innerJoin(boards, eq(boards.id, notifications.boardId))
       .where(and(mine, isNull(notifications.readAt))),
   ])) as [
     Array<{
       id: string
       kind: 'decisionClosed'
-      closedAt: Date
       createdAt: Date
       readAt: Date | null
       boardId: string
       boardName: string
       decisionId: string
       title: string
-      decisionClosedAt: Date | null
-      decisionClosesAt: Date | null
     }>,
+    Array<{ notificationId: string; text: string; votes: number }>,
     Array<{ count: number }>,
   ]
-
-  // Closed questions always show their results (see publicState), so the
-  // winner is safe to include while this close is the current one.
-  const showsResults = new Set(
-    rows
-      .filter(
-        (row) =>
-          closeTimeOf(
-            {
-              closedAt: row.decisionClosedAt?.getTime() ?? null,
-              closesAt: row.decisionClosesAt?.getTime() ?? null,
-            },
-            now,
-          ) === row.closedAt.getTime(),
-      )
-      .map((row) => row.id),
-  )
-  const winners = await winnersOf(db, [
-    ...new Set(
-      rows.filter((row) => showsResults.has(row.id)).map((r) => r.decisionId),
-    ),
-  ])
 
   return {
     unreadCount: unread[0]?.count ?? 0,
@@ -176,41 +202,39 @@ export async function listNotifications(
         title: row.title,
         createdAt: row.createdAt.getTime(),
         isRead: row.readAt !== null,
-        winners: showsResults.has(row.id)
-          ? (winners.get(row.decisionId) ?? [])
-          : null,
+        winners: winnersOf(counts.filter((c) => c.notificationId === row.id)),
       }),
     ),
   }
 }
 
-/** The top options of each question (ties included); none without votes. */
-async function winnersOf(db: BatchingDb, decisionIds: Array<string>) {
-  const winners = new Map<string, Array<string>>()
-  if (decisionIds.length === 0) return winners
-
-  const counts = await db
-    .select({
-      decisionId: options.decisionId,
-      text: options.text,
-      votes: sql<number>`count(${votes.userId})`,
-    })
-    .from(options)
-    .leftJoin(votes, eq(votes.optionId, options.id))
-    .where(inArray(options.decisionId, decisionIds))
-    .groupBy(options.id)
-    .orderBy(options.position, options.id)
-
-  for (const decisionId of decisionIds) {
-    const own = counts.filter((c) => c.decisionId === decisionId)
-    const top = Math.max(0, ...own.map((c) => c.votes))
-    winners.set(
-      decisionId,
-      top === 0 ? [] : own.filter((c) => c.votes === top).map((c) => c.text),
-    )
-  }
-  return winners
+/**
+ * The top options (ties included; none if nobody voted), or null if no
+ * counts came back because the close is no longer current.
+ */
+function winnersOf(counts: Array<{ text: string; votes: number }>) {
+  if (counts.length === 0) return null
+  const top = Math.max(...counts.map((c) => c.votes))
+  return top === 0
+    ? []
+    : counts.filter((c) => c.votes === top).map((c) => c.text)
 }
+
+/**
+ * Most ids one mark-read request may carry. D1 binds at most 100 parameters
+ * per statement, and the update also binds the time and the user id. The
+ * list never shows more than NOTIFICATION_LIST_LIMIT, so this is plenty.
+ */
+export const MARK_READ_MAX_IDS = 50
+
+/** Ids to mark read, or none for all of them. */
+export const markReadInputSchema = z.object({
+  ids: z
+    .array(z.string().min(1).max(64))
+    .min(1)
+    .max(MARK_READ_MAX_IDS)
+    .optional(),
+})
 
 /** Marks some of the user's notifications read; other people's are untouched. */
 export async function markNotificationsRead(
@@ -220,7 +244,16 @@ export async function markNotificationsRead(
   now: number,
 ) {
   if (ids.length === 0) return
-  await db
+  await markReadStatement(db, userId, ids, now)
+}
+
+export function markReadStatement(
+  db: BatchingDb,
+  userId: string,
+  ids: Array<string>,
+  now: number,
+) {
+  return db
     .update(notifications)
     .set({ readAt: new Date(now) })
     .where(
