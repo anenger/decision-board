@@ -11,6 +11,7 @@ export function Popover({
   children,
   triggerClassName = '',
   anchored = false,
+  wide = false,
 }: {
   label: string
   trigger: ReactNode
@@ -21,6 +22,8 @@ export function Popover({
    * of their container, like a card's menu, which can't run off-screen.
    */
   anchored?: boolean
+  /** A roomier card above phone widths, for lists. */
+  wide?: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -64,7 +67,7 @@ export function Popover({
           className={`anim-pop sticker z-50 bg-white p-3 ${
             anchored
               ? 'absolute top-[calc(100%+0.4rem)] right-0 w-60 origin-top-right'
-              : 'fixed inset-x-4 top-[calc(4.25rem+env(safe-area-inset-top))] origin-top sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.6rem)] sm:right-0 sm:w-72 sm:origin-top-right'
+              : `fixed inset-x-4 top-[calc(4.25rem+env(safe-area-inset-top))] origin-top sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.6rem)] sm:right-0 sm:origin-top-right ${wide ? 'sm:w-80' : 'sm:w-72'}`
           }`}
         >
           {children(() => setIsOpen(false))}

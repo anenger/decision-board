@@ -1,4 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm'
+import { closeTimeOf, insertCloseNotifications } from './notifications'
 import type { BatchingDb } from '@/db/types'
 import type {
   BoardSnapshot,
@@ -23,6 +24,8 @@ export type LoadedBoard = {
   votesByUser: Map<string, VoteMap>
   /** Invited members; the owner is state.board.ownerId. */
   members: Map<string, InviteRole>
+  /** Decision id → the close its members were last notified about. */
+  notifiedCloseAt: Map<string, number>
 }
 
 export async function loadBoard(
@@ -114,6 +117,11 @@ export async function loadBoard(
     },
     votesByUser,
     members: new Map(memberRows.map((m) => [m.userId, m.role])),
+    notifiedCloseAt: new Map(
+      decisionRows.flatMap((d) =>
+        d.notifiedCloseAt ? [[d.id, d.notifiedCloseAt.getTime()]] : [],
+      ),
+    ),
   }
 }
 
@@ -137,8 +145,17 @@ export function snapshotFor(
 }
 
 export type CommitResult =
-  | { ok: true; stateChanged: boolean; myVotes: VoteMap }
+  | {
+      ok: true
+      stateChanged: boolean
+      myVotes: VoteMap
+      /** People who got a new notification from this change. */
+      notified: Array<string>
+    }
   | { ok: false; reason: string }
+
+/** A close that members were told about in the same write. */
+type Notified = { decisionId: string; closedAt: number; userIds: Array<string> }
 
 /**
  * Checks, saves and applies one operation, updating `board` in place. The
@@ -155,8 +172,16 @@ export async function commitOperation(
   const error = checkOperation(board.state, op, { id: actorId, role }, now)
   if (error) return { ok: false, reason: error }
 
+  let notified: Notified | null
   try {
-    await persistOperation(db, board.state, op, actorId, now)
+    notified = await persistOperation(
+      db,
+      board.state,
+      board.notifiedCloseAt,
+      op,
+      actorId,
+      now,
+    )
   } catch (cause) {
     // For example, a decision id that already exists on another board.
     console.error('Failed to save board operation', { op, cause })
@@ -182,9 +207,86 @@ export async function commitOperation(
     for (const userVotes of board.votesByUser.values()) {
       delete userVotes[op.decisionId]
     }
+    board.notifiedCloseAt.delete(op.decisionId)
   }
+  if (notified)
+    board.notifiedCloseAt.set(notified.decisionId, notified.closedAt)
 
-  return { ok: true, stateChanged, myVotes: next.myVotes }
+  return {
+    ok: true,
+    stateChanged,
+    myVotes: next.myVotes,
+    notified: notified?.userIds ?? [],
+  }
+}
+
+/**
+ * Notifies members about questions that closed without anyone closing them,
+ * i.e. their deadline passed. Each close is notified once, even if this runs
+ * again after a failure or a retried alarm. Returns who got a notification.
+ */
+export async function notifyClosedDecisions(
+  db: BatchingDb,
+  board: LoadedBoard,
+  now: number,
+): Promise<Array<string>> {
+  const boardId = board.state.board.id
+  const due = board.state.decisions.flatMap((decision) => {
+    const closedAt = closeTimeOf(decision, now)
+    return closedAt !== null &&
+      board.notifiedCloseAt.get(decision.id) !== closedAt
+      ? [{ decisionId: decision.id, closedAt }]
+      : []
+  })
+  if (due.length === 0) return []
+
+  const [first, ...rest] = due.flatMap((close) =>
+    closeWrites(db, boardId, close.decisionId, close.closedAt, null, now),
+  )
+  const results = (await db.batch([first, ...rest])) as Array<unknown>
+  for (const close of due) {
+    board.notifiedCloseAt.set(close.decisionId, close.closedAt)
+  }
+  return uniqueRecipients(results)
+}
+
+/**
+ * Records that a close was notified and notifies everyone else on the board,
+ * as two statements to run in one batch (a single transaction in D1).
+ */
+function closeWrites(
+  db: BatchingDb,
+  boardId: string,
+  decisionId: string,
+  closedAt: number,
+  closedBy: string | null,
+  now: number,
+) {
+  return [
+    db
+      .update(decisions)
+      .set({ notifiedCloseAt: new Date(closedAt) })
+      .where(and(eq(decisions.id, decisionId), eq(decisions.boardId, boardId))),
+    insertCloseNotifications(db, {
+      boardId,
+      decisionId,
+      closedAt,
+      exceptUserId: closedBy,
+      now,
+    }),
+  ] as const
+}
+
+/** The user ids returned by the notification inserts in a batch. */
+function uniqueRecipients(results: Array<unknown>) {
+  const userIds = new Set<string>()
+  for (const result of results) {
+    if (!Array.isArray(result)) continue
+    for (const row of result as Array<{ userId?: unknown }>) {
+      if (typeof row.userId === 'string') userIds.add(row.userId)
+    }
+  }
+  return [...userIds]
 }
 
 /**
@@ -195,10 +297,11 @@ export async function commitOperation(
 async function persistOperation(
   db: BatchingDb,
   before: BoardState,
+  notifiedCloseAt: ReadonlyMap<string, number>,
   op: Operation,
   actorId: string,
   now: number,
-) {
+): Promise<Notified | null> {
   const boardId = before.board.id
   const decision = before.decisions.find((d) => d.id === op.decisionId)
   const inThisBoard = and(
@@ -208,7 +311,7 @@ async function persistOperation(
 
   switch (op.kind) {
     case 'createDecision': {
-      if (decision) return
+      if (decision) return null
       await db.batch([
         db.insert(decisions).values({
           id: op.decisionId,
@@ -229,39 +332,65 @@ async function persistOperation(
           })),
         ),
       ])
-      return
+      return null
     }
 
     case 'renameDecision':
       await db.update(decisions).set({ title: op.title }).where(inThisBoard)
-      return
+      return null
 
-    case 'setDecisionClosed':
-      if (!decision) return
-      if (op.closed) {
-        if (!isDecisionOpen(decision, now)) return
-        await db
-          .update(decisions)
-          .set({ closedAt: new Date(now) })
-          .where(inThisBoard)
-      } else {
+    case 'setDecisionClosed': {
+      if (!decision) return null
+      if (!op.closed) {
         // Reopening clears the deadline too, or it would close again at once.
-        await db
+        const reopen = db
           .update(decisions)
           .set({ closedAt: null, closesAt: null })
           .where(inThisBoard)
+        // A deadline that passed before its alarm ran hasn't been announced,
+        // and once the deadline is cleared nothing will find it again. So
+        // announce it in the same write, to everyone but the person
+        // reopening it.
+        const missed = closeTimeOf(decision, now)
+        if (missed === null || notifiedCloseAt.get(op.decisionId) === missed) {
+          await reopen
+          return null
+        }
+        const [, notified] = (await db.batch([
+          ...closeWrites(db, boardId, op.decisionId, missed, actorId, now),
+          reopen,
+        ])) as [unknown, Array<{ userId: string }>, unknown]
+        return {
+          decisionId: op.decisionId,
+          closedAt: missed,
+          userIds: notified.map((row) => row.userId),
+        }
       }
-      return
+      if (!isDecisionOpen(decision, now)) return null
+      // Closing and notifying commit together, or not at all.
+      const [, , notified] = (await db.batch([
+        db
+          .update(decisions)
+          .set({ closedAt: new Date(now) })
+          .where(inThisBoard),
+        ...closeWrites(db, boardId, op.decisionId, now, actorId, now),
+      ])) as [unknown, unknown, Array<{ userId: string }>]
+      return {
+        decisionId: op.decisionId,
+        closedAt: now,
+        userIds: notified.map((row) => row.userId),
+      }
+    }
 
     case 'deleteDecision':
-      if (!decision) return
+      if (!decision) return null
       // Options and votes are removed by cascading deletes.
       await db.delete(decisions).where(inThisBoard)
-      return
+      return null
 
     case 'addOption':
       if (!decision || decision.options.some((o) => o.id === op.optionId)) {
-        return
+        return null
       }
       await db.insert(options).values({
         id: op.optionId,
@@ -270,7 +399,7 @@ async function persistOperation(
         position: decision.options.length,
         createdById: actorId,
       })
-      return
+      return null
 
     case 'setVote': {
       const mine = and(
@@ -279,7 +408,7 @@ async function persistOperation(
       )
       if (op.optionId === null) {
         await db.delete(votes).where(mine)
-        return
+        return null
       }
       await db
         .insert(votes)
@@ -292,7 +421,7 @@ async function persistOperation(
           target: [votes.decisionId, votes.userId],
           set: { optionId: op.optionId },
         })
-      return
+      return null
     }
   }
 }

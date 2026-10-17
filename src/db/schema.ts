@@ -53,6 +53,11 @@ export const decisions = sqliteTable(
     hideResults: integer('hide_results', { mode: 'boolean' })
       .default(false)
       .notNull(),
+    /**
+     * The close (closed_at, or the deadline once it passed) that board members
+     * were last notified about, so a retried alarm doesn't notify twice.
+     */
+    notifiedCloseAt: integer('notified_close_at', { mode: 'timestamp_ms' }),
   },
   (table) => [index('decisions_board_idx').on(table.boardId)],
 )
@@ -131,5 +136,42 @@ export const votes = sqliteTable(
     primaryKey({ columns: [table.decisionId, table.userId] }),
     index('votes_option_idx').on(table.optionId),
     index('votes_user_idx').on(table.userId),
+  ],
+)
+
+/**
+ * In-app notifications, written by the board's Durable Object in the same
+ * batch as the change that caused them. Rows only point at the question; the
+ * text is worked out when read, so it never shows what the board would hide.
+ */
+export const notifications = sqliteTable(
+  'notifications',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    boardId: text('board_id')
+      .notNull()
+      .references(() => boards.id, { onDelete: 'cascade' }),
+    decisionId: text('decision_id')
+      .notNull()
+      .references(() => decisions.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['decisionClosed'] }).notNull(),
+    /** Which close this is about; closing again after a reopen is a new one. */
+    closedAt: integer('closed_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: createdAt(),
+    readAt: integer('read_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => [
+    uniqueIndex('notifications_event_idx').on(
+      table.userId,
+      table.decisionId,
+      table.kind,
+      table.closedAt,
+    ),
+    index('notifications_user_created_idx').on(table.userId, table.createdAt),
+    index('notifications_decision_idx').on(table.decisionId),
+    index('notifications_board_idx').on(table.boardId),
   ],
 )

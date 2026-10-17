@@ -131,6 +131,8 @@ export type ServerMessage =
       decisionId: string
       kind: ActivityKind
     }
+  /** Sent to a user's own connections when they get a new notification. */
+  | { type: 'notifications' }
 
 export const BOARD_PARTY = 'board-room'
 
