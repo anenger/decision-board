@@ -80,6 +80,26 @@ async function recipients() {
   return rows.map((r) => r.userId).sort()
 }
 
+/**
+ * The same database, except that `meanwhile` runs once right after its first
+ * batch, as if another request wrote between two reads.
+ */
+function writeAfterFirstBatch(meanwhile: () => Promise<unknown>): TestDb {
+  let pending: (() => Promise<unknown>) | null = meanwhile
+  return new Proxy(db, {
+    get(target, property, receiver) {
+      if (property !== 'batch') return Reflect.get(target, property, receiver)
+      return async (...args: Parameters<TestDb['batch']>) => {
+        const result = await target.batch(...args)
+        const run = pending
+        pending = null
+        if (run) await run()
+        return result
+      }
+    },
+  })
+}
+
 beforeEach(async () => {
   db = await createTestDb()
   await db.insert(user).values(
@@ -221,6 +241,29 @@ describe('no duplicates', () => {
     expect(await recipients()).toHaveLength(3)
   })
 
+  it('announces a passed deadline when reopening beats the alarm', async () => {
+    const board = await load()
+    await commit(board, ask('lunch', { closesAt: DEADLINE }), 'editor', START)
+
+    // The deadline passed, but the alarm hasn't run yet when it's reopened.
+    const reopened = await commit(
+      board,
+      close('lunch', false),
+      'editor',
+      DEADLINE + 1,
+    )
+
+    // Everyone but the person reopening it hears that it closed...
+    expect(reopened.notified.sort()).toEqual(['owner', 'voter'])
+    expect(await recipients()).toEqual(['owner', 'voter'])
+    // ...and the late alarm, or a reload, has nothing left to add.
+    expect(await notifyClosedDecisions(db, board, DEADLINE + 2)).toEqual([])
+    expect(await notifyClosedDecisions(db, await load(), DEADLINE + 3)).toEqual(
+      [],
+    )
+    expect(await recipients()).toEqual(['owner', 'voter'])
+  })
+
   it('treats closing again after a reopen as a new close', async () => {
     const board = await load()
     await commit(board, ask('lunch', { closesAt: DEADLINE }), 'editor', START)
@@ -271,6 +314,35 @@ describe('secret results', () => {
       result: null,
     })
     expect(JSON.stringify(reopened)).not.toMatch(/Tacos|Pizza/)
+  })
+
+  it('never names a winner that a reopen made secret mid-read', async () => {
+    const board = await load()
+    await commit(
+      board,
+      ask('lunch', { closesAt: DEADLINE, hideResults: true }),
+      'editor',
+      START,
+    )
+    await commit(board, vote('lunch', 'pizza'), 'voter', START + 1)
+    await notifyClosedDecisions(db, board, DEADLINE)
+
+    // While the list is being read, the question is reopened (its counts are
+    // secret again) and the votes swing to Tacos.
+    const racing = writeAfterFirstBatch(async () => {
+      await commit(board, close('lunch', false), 'editor', DEADLINE + 2)
+      await commit(board, vote('lunch', 'tacos'), 'owner', DEADLINE + 3)
+      await commit(board, vote('lunch', 'tacos'), 'editor', DEADLINE + 4)
+    })
+    const list = await listNotifications(racing, 'voter', DEADLINE + 1)
+
+    // The list reflects one moment: closed, with Pizza ahead. Tacos leading
+    // was only ever true while the counts were hidden.
+    expect(list.items[0]?.winners).toEqual(['Pizza'])
+    expect(JSON.stringify(list)).not.toContain('Tacos')
+    // Read again now, it's reopened: no winner at all.
+    const after = await listNotifications(db, 'voter', DEADLINE + 5)
+    expect(after.items[0]?.winners).toBeNull()
   })
 
   it('keeps an old close quiet about results after a later one', async () => {
@@ -327,6 +399,23 @@ describe('reading notifications', () => {
     expect(voter.items.map((i) => i.id).sort()).toEqual(
       voterRows.map((r) => r.id).sort(),
     )
+  })
+
+  it('hides notifications from people no longer on the board until they rejoin', async () => {
+    await setMemberRole(db, 'board', 'voter', null)
+
+    expect(await listNotifications(db, 'voter', START + 4)).toEqual({
+      items: [],
+      unreadCount: 0,
+    })
+    // Hidden, not deleted: rejoining brings the history back.
+    expect(await recipients()).toContain('voter')
+    await db
+      .insert(boardMembers)
+      .values({ boardId: 'board', userId: 'voter', role: 'voter' })
+    const back = await listNotifications(db, 'voter', START + 5)
+    expect(back.unreadCount).toBe(2)
+    expect(back.items).toHaveLength(2)
   })
 
   it("can't mark someone else's notifications read", async () => {

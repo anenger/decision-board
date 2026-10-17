@@ -174,7 +174,14 @@ export async function commitOperation(
 
   let notified: Notified | null
   try {
-    notified = await persistOperation(db, board.state, op, actorId, now)
+    notified = await persistOperation(
+      db,
+      board.state,
+      board.notifiedCloseAt,
+      op,
+      actorId,
+      now,
+    )
   } catch (cause) {
     // For example, a decision id that already exists on another board.
     console.error('Failed to save board operation', { op, cause })
@@ -290,6 +297,7 @@ function uniqueRecipients(results: Array<unknown>) {
 async function persistOperation(
   db: BatchingDb,
   before: BoardState,
+  notifiedCloseAt: ReadonlyMap<string, number>,
   op: Operation,
   actorId: string,
   now: number,
@@ -342,11 +350,28 @@ async function persistOperation(
       if (!decision) return null
       if (!op.closed) {
         // Reopening clears the deadline too, or it would close again at once.
-        await db
+        const reopen = db
           .update(decisions)
           .set({ closedAt: null, closesAt: null })
           .where(inThisBoard)
-        return null
+        // A deadline that passed before its alarm ran hasn't been announced,
+        // and once the deadline is cleared nothing will find it again. So
+        // announce it in the same write, to everyone but the person
+        // reopening it.
+        const missed = closeTimeOf(decision, now)
+        if (missed === null || notifiedCloseAt.get(op.decisionId) === missed) {
+          await reopen
+          return null
+        }
+        const [, notified] = (await db.batch([
+          ...closeWrites(db, boardId, op.decisionId, missed, actorId, now),
+          reopen,
+        ])) as [unknown, Array<{ userId: string }>, unknown]
+        return {
+          decisionId: op.decisionId,
+          closedAt: missed,
+          userIds: notified.map((row) => row.userId),
+        }
       }
       if (!isDecisionOpen(decision, now)) return null
       // Closing and notifying commit together, or not at all.
