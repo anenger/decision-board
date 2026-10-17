@@ -3,8 +3,10 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import {
   createBoard,
+  deleteBoard,
   getBoard,
   getBoardSharing,
   getSessionInfo,
@@ -71,4 +73,22 @@ export function useUpdateMemberRoleMutation(boardId: string) {
     onSettled: () =>
       queryClient.invalidateQueries(boardQueries.sharing(boardId)),
   })
+}
+
+export function useDeleteBoardMutation(boardId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => deleteBoard({ data: { boardId } }),
+    onSuccess: () => forgetBoard(queryClient, boardId),
+  })
+}
+
+/**
+ * Drops a deleted board from the cache, so "Your boards" no longer lists it
+ * and its link loads fresh (and finds nothing) instead of the old copy.
+ */
+export function forgetBoard(queryClient: QueryClient, boardId: string) {
+  queryClient.removeQueries(boardQueries.detail(boardId))
+  queryClient.removeQueries(boardQueries.sharing(boardId))
+  return queryClient.invalidateQueries(boardQueries.mine())
 }

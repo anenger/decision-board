@@ -12,6 +12,7 @@ import {
   useCreateBoardMutation,
 } from '@/data/queries'
 import { hashString } from '@/lib/board-sync/persona'
+import { LIMITS } from '@/lib/board-sync/protocol'
 import { useHydrated } from '@/lib/use-hydrated'
 
 const relativeFormatter = new Intl.RelativeTimeFormat('en', {
@@ -125,7 +126,7 @@ function BoardsHome() {
             <input
               ref={inputRef}
               value={boardName}
-              maxLength={100}
+              maxLength={LIMITS.boardNameLength}
               onChange={(event) => setBoardName(event.target.value)}
               placeholder="Name your board…"
               aria-label="Board name"

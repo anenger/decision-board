@@ -26,6 +26,8 @@ export type BoardSyncView = {
   you: string | null
   /** Changes other people made in the last few seconds. */
   activity: Array<Activity>
+  /** The board was deleted. Nothing more is sent or received. */
+  deleted: boolean
 }
 
 export type Activity = {
@@ -58,6 +60,22 @@ const LOCAL_ACTOR = 'local'
 
 const BOARD_NOT_FOUND_CODE = 4404
 
+function queueKey(boardId: string) {
+  return `board-sync:${boardId}`
+}
+
+/**
+ * Forgets a board's offline changes, so nothing is replayed to a board that
+ * no longer exists.
+ */
+export async function clearBoardQueue(boardId: string) {
+  try {
+    await del(queueKey(boardId))
+  } catch {
+    // IndexedDB may be unavailable, in which case nothing was stored.
+  }
+}
+
 /**
  * Keeps one board in sync with its BoardRoom. Changes show immediately, are
  * queued in IndexedDB so they survive reloads and dropped connections, and
@@ -72,6 +90,7 @@ export class BoardSyncClient {
   private people: Array<Person> = []
   private you: string | null = null
   private activity: Array<Activity> = []
+  private deleted = false
   private socket: PartySocket | null = null
   /** Who the current socket is signed in as; undefined until its snapshot. */
   private socketViewerId: string | null | undefined
@@ -110,9 +129,10 @@ export class BoardSyncClient {
     })
     socket.addEventListener('close', (event: CloseEvent) => {
       this.socketViewerId = undefined
+      // Also how a tab that was offline during the delete finds out.
       if (event.code === BOARD_NOT_FOUND_CODE) {
-        socket.close()
-        this.error = 'This board no longer exists'
+        this.markDeleted()
+        return
       }
       // Who's here is unknown until the next snapshot.
       if (!this.isReconnecting) this.people = []
@@ -139,6 +159,7 @@ export class BoardSyncClient {
   }
 
   submit = (op: Operation) => {
+    if (this.deleted) return
     const pending = { opId: crypto.randomUUID(), op }
     this.pending = [...this.pending, pending]
     void this.saveQueue()
@@ -187,6 +208,9 @@ export class BoardSyncClient {
       case 'activity':
         this.recordActivity(message)
         break
+      case 'deleted':
+        this.markDeleted()
+        return
     }
     this.update({})
   }
@@ -214,6 +238,18 @@ export class BoardSyncClient {
       this.activity = this.activity.filter((a) => a.id !== entry.id)
       this.update({})
     }, ACTIVITY_MS)
+  }
+
+  /** Drops every pending change and stops reconnecting. */
+  private markDeleted() {
+    if (this.deleted) return
+    this.deleted = true
+    this.pending = []
+    this.people = []
+    this.error = null
+    this.socket?.close()
+    void clearBoardQueue(this.options.boardId)
+    this.update({ status: 'offline' })
   }
 
   /** Sends every pending change on a freshly synced socket. */
@@ -256,15 +292,11 @@ export class BoardSyncClient {
     void this.saveQueue()
   }
 
-  private get storageKey() {
-    return `board-sync:${this.options.boardId}`
-  }
-
   private async restoreQueue() {
-    const stored = await get<StoredQueue>(this.storageKey).catch(
+    const stored = await get<StoredQueue>(queueKey(this.options.boardId)).catch(
       () => undefined,
     )
-    if (!stored?.pending.length) return
+    if (!stored?.pending.length || this.deleted) return
     // Changes queued by a different signed-in user aren't ours to send.
     if (stored.viewerId && this.viewerId && stored.viewerId !== this.viewerId) {
       return
@@ -287,10 +319,11 @@ export class BoardSyncClient {
 
   private async saveQueue() {
     try {
+      const key = queueKey(this.options.boardId)
       if (this.pending.length === 0) {
-        await del(this.storageKey)
+        await del(key)
       } else {
-        await set(this.storageKey, {
+        await set(key, {
           viewerId: this.viewerId,
           pending: this.pending,
         } satisfies StoredQueue)
@@ -333,6 +366,7 @@ export class BoardSyncClient {
       people: this.people,
       you: this.you,
       activity: this.activity,
+      deleted: this.deleted,
     }
   }
 }
