@@ -2,6 +2,7 @@ import PartySocket from 'partysocket'
 import { del, get, set } from 'idb-keyval'
 import { BOARD_PARTY } from './protocol'
 import { applyOperation, checkOperation } from './reducer'
+import { clearBoardQueue, queueKey } from './offline-queue'
 import type {
   ActivityKind,
   BoardSnapshot,
@@ -26,6 +27,8 @@ export type BoardSyncView = {
   you: string | null
   /** Changes other people made in the last few seconds. */
   activity: Array<Activity>
+  /** The board was deleted. Nothing more is sent or received. */
+  deleted: boolean
 }
 
 export type Activity = {
@@ -72,6 +75,7 @@ export class BoardSyncClient {
   private people: Array<Person> = []
   private you: string | null = null
   private activity: Array<Activity> = []
+  private deleted = false
   private socket: PartySocket | null = null
   /** Who the current socket is signed in as; undefined until its snapshot. */
   private socketViewerId: string | null | undefined
@@ -110,10 +114,12 @@ export class BoardSyncClient {
     })
     socket.addEventListener('close', (event: CloseEvent) => {
       this.socketViewerId = undefined
+      // Also how a tab that was offline during the delete finds out.
       if (event.code === BOARD_NOT_FOUND_CODE) {
-        socket.close()
-        this.error = 'This board no longer exists'
+        void this.markDeleted()
+        return
       }
+      if (this.deleted) return
       // Who's here is unknown until the next snapshot.
       if (!this.isReconnecting) this.people = []
       this.update({ status: this.isReconnecting ? 'connecting' : 'offline' })
@@ -133,12 +139,15 @@ export class BoardSyncClient {
    * invite link. The fresh snapshot carries the new role.
    */
   reconnect = () => {
+    // A late invite or sign-in mustn't bring a deleted board's socket back.
+    if (this.deleted) return
     this.isReconnecting = true
     this.update({ status: 'connecting' })
     this.socket?.reconnect()
   }
 
   submit = (op: Operation) => {
+    if (this.deleted) return
     const pending = { opId: crypto.randomUUID(), op }
     this.pending = [...this.pending, pending]
     void this.saveQueue()
@@ -157,6 +166,8 @@ export class BoardSyncClient {
   }
 
   private receive(message: ServerMessage) {
+    // Anything still buffered from before the delete is moot.
+    if (this.deleted) return
     switch (message.type) {
       case 'snapshot':
         this.people = message.people
@@ -187,6 +198,9 @@ export class BoardSyncClient {
       case 'activity':
         this.recordActivity(message)
         break
+      case 'deleted':
+        void this.markDeleted()
+        return
     }
     this.update({})
   }
@@ -216,6 +230,25 @@ export class BoardSyncClient {
     }, ACTIVITY_MS)
   }
 
+  /**
+   * The board is gone: drops every pending change, here and in IndexedDB,
+   * and stops the socket for good. Called when the room says so, and by the
+   * owner's tab after its delete succeeds, which may be while offline. Safe
+   * to call again; each call stops the socket in case something restarted
+   * it, and clears storage in case a save landed in between.
+   */
+  markDeleted = () => {
+    this.socket?.close()
+    if (!this.deleted) {
+      this.deleted = true
+      this.pending = []
+      this.people = []
+      this.error = null
+      this.update({ status: 'offline' })
+    }
+    return clearBoardQueue(this.options.boardId)
+  }
+
   /** Sends every pending change on a freshly synced socket. */
   private flush() {
     if (this.pending.length === 0) return
@@ -231,11 +264,14 @@ export class BoardSyncClient {
    * reconnect; the new socket's snapshot then flushes the queue.
    */
   private async authenticate() {
-    if (this.isAuthenticating) return
+    if (this.isAuthenticating || this.deleted) return
     this.isAuthenticating = true
     try {
       this.viewerId = await this.options.ensureViewer()
+      // The board may have been deleted while the session was being made.
+      if (this.wasDeleted()) return
       await this.saveQueue()
+      if (this.wasDeleted()) return
       this.isReconnecting = true
       this.socket?.reconnect()
     } catch {
@@ -244,6 +280,14 @@ export class BoardSyncClient {
       this.isAuthenticating = false
       this.update({})
     }
+  }
+
+  /**
+   * Reads `deleted` afresh after an await; TypeScript would otherwise assume
+   * it can't have changed since it was last checked.
+   */
+  private wasDeleted() {
+    return this.deleted
   }
 
   private send({ opId, op }: PendingOperation) {
@@ -256,15 +300,11 @@ export class BoardSyncClient {
     void this.saveQueue()
   }
 
-  private get storageKey() {
-    return `board-sync:${this.options.boardId}`
-  }
-
   private async restoreQueue() {
-    const stored = await get<StoredQueue>(this.storageKey).catch(
+    const stored = await get<StoredQueue>(queueKey(this.options.boardId)).catch(
       () => undefined,
     )
-    if (!stored?.pending.length) return
+    if (!stored?.pending.length || this.deleted) return
     // Changes queued by a different signed-in user aren't ours to send.
     if (stored.viewerId && this.viewerId && stored.viewerId !== this.viewerId) {
       return
@@ -287,10 +327,11 @@ export class BoardSyncClient {
 
   private async saveQueue() {
     try {
+      const key = queueKey(this.options.boardId)
       if (this.pending.length === 0) {
-        await del(this.storageKey)
+        await del(key)
       } else {
-        await set(this.storageKey, {
+        await set(key, {
           viewerId: this.viewerId,
           pending: this.pending,
         } satisfies StoredQueue)
@@ -333,6 +374,7 @@ export class BoardSyncClient {
       people: this.people,
       you: this.you,
       activity: this.activity,
+      deleted: this.deleted,
     }
   }
 }

@@ -51,9 +51,11 @@ export function useBoardSync(
     people: view.people,
     you: view.you,
     activity: view.activity,
+    deleted: view.deleted,
     submit: client.submit,
     dismissError: client.dismissError,
     reconnect: client.reconnect,
+    markDeleted: client.markDeleted,
   }
 }
 

@@ -19,7 +19,7 @@ import type { BoardSummary } from '@/lib/board'
 import type { BoardSnapshot, InviteRole, Role } from '@/lib/board-sync/protocol'
 import { db } from '@/db'
 import { boards } from '@/db/schema'
-import { hasRole } from '@/lib/board-sync/protocol'
+import { LIMITS, hasRole } from '@/lib/board-sync/protocol'
 
 // Changes to a board's contents go through its BoardRoom Durable Object
 // (src/server/board-room.ts); these functions cover reads, accounts and
@@ -65,7 +65,9 @@ export const getBoard = createServerFn({ method: 'GET' })
   })
 
 export const createBoard = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ name: z.string().trim().max(100) }))
+  .inputValidator(
+    z.object({ name: z.string().trim().max(LIMITS.boardNameLength) }),
+  )
   .handler(async ({ data }) => {
     const viewer = await requireViewer()
     const id = crypto.randomUUID()
@@ -91,8 +93,11 @@ export const acceptBoardInvite = createServerFn({ method: 'POST' })
     const viewer = await requireViewer()
     const role = await acceptInvite(db, data.boardId, data.token, viewer.id)
     if (role === null) {
+      const exists = (await getBoardRole(db, data.boardId, null)) !== null
       throw new Error(
-        'This invite link has been reset. Ask for a new one to join in.',
+        exists
+          ? 'This invite link has been reset. Ask for a new one to join in.'
+          : 'This board was deleted.',
       )
     }
     await refreshRoom(data.boardId)
@@ -146,6 +151,22 @@ export const updateMemberRole = createServerFn({ method: 'POST' })
     }
     await setMemberRole(db, data.boardId, data.userId, data.role)
     await refreshRoom(data.boardId)
+  })
+
+/**
+ * Deletes a board for good. Renaming goes over the board's socket like any
+ * other change; deleting goes through the room too, but waits for the
+ * answer so the owner only sees it gone once it really is.
+ */
+export const deleteBoard = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ boardId: boardIdSchema }))
+  .handler(async ({ data }) => {
+    // No session means not the owner; don't make a guest account to say so.
+    const viewer = await getViewer()
+    if (!viewer) throw new Error('Only the board owner can delete it')
+    const room = await getServerByName(env.BOARD_ROOM, data.boardId)
+    const result = await room.deleteBoard(viewer.id)
+    if (!result.ok) throw new Error(result.reason)
   })
 
 async function requireRole(
