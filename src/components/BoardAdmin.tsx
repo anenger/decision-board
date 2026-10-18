@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Lock, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import { Mascot } from './Mascot'
 import { MenuItem } from './MenuItem'
@@ -12,17 +12,23 @@ import { LIMITS } from '@/lib/board-sync/protocol'
 
 /**
  * The board's big title. Its owner gets a ⋯ menu, like a question's, to
- * rename the board in place or delete it.
+ * rename the board in place, close voting on every open question, or delete
+ * the board.
  */
 export function BoardTitle({
   name,
   canManage,
+  openCount,
   onRename,
+  onCloseAll,
   onDelete,
 }: {
   name: string
   canManage: boolean
+  /** Questions still taking votes. */
+  openCount: number
   onRename: (name: string) => void
+  onCloseAll: () => void
   onDelete: () => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
@@ -56,31 +62,73 @@ export function BoardTitle({
             trigger={<MoreHorizontal size={22} />}
           >
             {(close) => (
-              <div className="space-y-1">
-                <MenuItem
-                  icon={<Pencil size={17} />}
-                  onClick={() => {
-                    close()
-                    setDraft(name)
-                  }}
-                >
-                  Rename board
-                </MenuItem>
-                <MenuItem
-                  icon={<Trash2 size={17} />}
-                  destructive
-                  onClick={() => {
-                    close()
-                    onDelete()
-                  }}
-                >
-                  Delete board…
-                </MenuItem>
-              </div>
+              <BoardMenu
+                openCount={openCount}
+                onRename={() => {
+                  close()
+                  setDraft(name)
+                }}
+                onCloseAll={() => {
+                  close()
+                  onCloseAll()
+                }}
+                onDelete={() => {
+                  close()
+                  onDelete()
+                }}
+              />
             )}
           </Popover>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Rendered only while the menu is open, so a half-confirmed "close all"
+ * starts over the next time it opens.
+ */
+function BoardMenu({
+  openCount,
+  onRename,
+  onCloseAll,
+  onDelete,
+}: {
+  openCount: number
+  onRename: () => void
+  onCloseAll: () => void
+  onDelete: () => void
+}) {
+  const [confirmingClose, setConfirmingClose] = useState(false)
+
+  return (
+    <div className="space-y-1">
+      <MenuItem icon={<Pencil size={17} />} onClick={onRename}>
+        Rename board
+      </MenuItem>
+      {/* Everyone on the board is notified, so it takes a second tap. */}
+      {openCount > 0 &&
+        (confirmingClose ? (
+          <button
+            type="button"
+            onClick={onCloseAll}
+            className="anim-pop focus-ring flex min-h-11 w-full items-center gap-3 rounded-2xl bg-ink px-3 text-left font-display font-semibold text-white"
+          >
+            <Lock size={17} className="shrink-0" />
+            Yes, close {plural(openCount, 'question')}
+          </button>
+        ) : (
+          <MenuItem
+            icon={<Lock size={17} />}
+            onClick={() => setConfirmingClose(true)}
+          >
+            Close all voting
+          </MenuItem>
+        ))}
+      <MenuItem icon={<Trash2 size={17} />} destructive onClick={onDelete}>
+        Delete board…
+      </MenuItem>
     </div>
   )
 }

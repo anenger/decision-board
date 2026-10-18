@@ -133,6 +133,21 @@ function LiveBoard({
     () => decisions.reduce((sum, decision) => sum + decision.totalVotes, 0),
     [decisions],
   )
+  const openDecisions = useMemo(
+    () => decisions.filter((decision) => decision.isOpen),
+    [decisions],
+  )
+  // One close per question, so each is checked, saved and notified like a
+  // close from its own card.
+  const closeAllVoting = useCallback(() => {
+    for (const decision of openDecisions) {
+      submit({
+        kind: 'setDecisionClosed',
+        decisionId: decision.id,
+        closed: true,
+      })
+    }
+  }, [openDecisions, submit])
 
   const activityByDecision = useMemo(() => {
     const latest = new Map<string, Activity>()
@@ -225,7 +240,9 @@ function LiveBoard({
           <BoardTitle
             name={board.name}
             canManage={board.canManage}
+            openCount={openDecisions.length}
             onRename={(name) => submit({ kind: 'renameBoard', name })}
+            onCloseAll={closeAllVoting}
             onDelete={() => setIsDeleting(true)}
           />
         </div>

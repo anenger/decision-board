@@ -61,7 +61,7 @@ Deleting asks the owner to type the board's name first. It goes through the boar
 
 ## Deadlines and secret results
 
-A question can close at a set time, or be closed and reopened by its author or the board owner. When voting closes, the winning options get a crown (ties included).
+A question can close at a set time, or be closed and reopened by its author or the board owner. The owner can also close every open question at once from the board's ⋯ menu; that sends one `setDecisionClosed` per question, so each is checked, saved and notified like a close from its card. When voting closes, the card leads with a winner banner, the winning options get a crown and a ring (ties included), and the rest fade out.
 
 A question can also keep its results secret until voting closes. The room never sends per-option counts for those questions, only the total number of votes, so the secret can't leak through the network tab. At the deadline, a Durable Object alarm wakes the room and broadcasts the revealed results, even if nobody touches the board.
 
