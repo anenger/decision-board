@@ -112,6 +112,9 @@ export default function DecisionCard({
         onSetClosed={onSetClosed}
       />
       <DecisionStatus decision={decision} />
+      {!decision.isOpen && (
+        <WinnerBanner decision={decision} revealCount={revealCount} />
+      )}
 
       <ul className="mt-4 space-y-2.5">
         {decision.options.map((option) => (
@@ -170,13 +173,10 @@ function DecisionStatus({ decision }: { decision: DecisionView }) {
 
   let text: string
   if (!decision.isOpen) {
-    const winners = decision.options.filter((o) => o.isWinner)
     text =
-      winners.length === 0
+      total === 0
         ? '🏁 Voting closed · nobody voted'
-        : winners.length === 1
-          ? `🏆 ${winners[0]?.text} won! · ${votes}`
-          : `🤝 It's a tie! · ${votes}`
+        : `🏁 Voting closed · ${votes}`
   } else if (decision.hideResults) {
     text = `🙈 Secret until it closes · ${votes} in`
   } else {
@@ -194,6 +194,56 @@ function DecisionStatus({ decision }: { decision: DecisionView }) {
           ⏰ {formatCountdown(decision.closesAt - now)}
         </span>
       )}
+    </div>
+  )
+}
+
+const listFormatter = new Intl.ListFormat('en', { type: 'conjunction' })
+
+/**
+ * The outcome of a closed question, big enough to read at a glance. Pops in
+ * again each time results are revealed while the card is on screen.
+ */
+function WinnerBanner({
+  decision,
+  revealCount,
+}: {
+  decision: DecisionView
+  revealCount: number
+}) {
+  const winners = decision.options.filter((o) => o.isWinner)
+  if (winners.length === 0) return null
+
+  const isTie = winners.length > 1
+  const votes = winners[0]?.votes ?? 0
+  const share =
+    decision.totalVotes > 0
+      ? Math.round((votes / decision.totalVotes) * 100)
+      : 0
+
+  return (
+    <div
+      key={revealCount}
+      className="anim-pop mt-3 flex items-center gap-3 rounded-2xl border-2 border-ink bg-white px-3.5 py-2.5 shadow-sticker"
+    >
+      <span aria-hidden="true" className="shrink-0 text-3xl">
+        {isTie ? '🤝' : '🏆'}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-bold tracking-wide text-ink-soft uppercase">
+          {isTie ? "It's a tie" : 'Winner'}
+        </p>
+        <p className="font-display text-xl leading-tight font-semibold wrap-anywhere">
+          {listFormatter.format(winners.map((w) => w.text))}
+        </p>
+      </div>
+      <p className="shrink-0 text-right text-sm leading-tight font-semibold text-ink-soft">
+        <span className="block font-display text-lg text-ink tabular-nums">
+          {share}%
+        </span>
+        {votes} vote{votes === 1 ? '' : 's'}
+        {isTie ? ' each' : ''}
+      </p>
     </div>
   )
 }
@@ -380,9 +430,11 @@ const OptionPill = memo(function OptionPill({
           if (!option.isSelected) setBurst((n) => n + 1)
           onVote(option.id)
         }}
-        className={`focus-ring relative flex min-h-[3.25rem] w-full items-center overflow-hidden rounded-2xl border-2 border-ink bg-white text-left transition-[transform,opacity] duration-200 enabled:active:scale-[0.97] disabled:cursor-default ${
+        className={`focus-ring relative flex min-h-[3.25rem] w-full items-center overflow-hidden rounded-2xl border-2 border-ink bg-white text-left transition-[transform,opacity,filter] duration-200 enabled:active:scale-[0.97] disabled:cursor-default ${
           option.isSelected || option.isWinner ? 'shadow-sticker' : ''
-        } ${isLoser ? 'opacity-60' : ''}`}
+        } ${option.isWinner ? 'ring-[3px] ring-tomato' : ''} ${
+          isLoser ? 'opacity-50 grayscale' : ''
+        }`}
       >
         <span
           aria-hidden="true"
