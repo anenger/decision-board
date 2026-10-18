@@ -3,6 +3,7 @@ import {
   commitOperation,
   deleteBoard,
   loadBoard,
+  notifyClosedDecisions,
   snapshotFor,
 } from './board-store'
 import { clientMessageSchema } from './operation-schema'
@@ -32,7 +33,7 @@ type ConnectionState = {
  * board: it checks each operation, saves it to D1, then broadcasts the new
  * state. D1 stays the source of truth, so the home page and server
  * rendering keep reading it directly. It also tracks who's viewing, and
- * wakes itself at each voting deadline to reveal results.
+ * wakes itself at each voting deadline to reveal results and notify members.
  */
 export class BoardRoom extends Server<Env> {
   static override options = { hibernate: true }
@@ -105,11 +106,16 @@ export class BoardRoom extends Server<Env> {
     return this.serialize(() => this.handleOperation(connection, result.data))
   }
 
-  /** A deadline passed: everyone gets the state with results revealed. */
+  /**
+   * A deadline passed: everyone gets the state with results revealed, and
+   * members are notified. If notifying fails, the error makes the runtime
+   * retry the alarm, and members are only ever notified once per close.
+   */
   override onAlarm() {
     return this.serialize(async () => {
       if (!this.board) return
       this.broadcastState()
+      this.pingNotified(await notifyClosedDecisions(db, this.board, Date.now()))
       await this.scheduleDeadline()
     })
   }
@@ -170,6 +176,7 @@ export class BoardRoom extends Server<Env> {
       Date.now(),
     )
     if (!result.ok) return reject(result.reason)
+    this.pingNotified(result.notified)
 
     if (result.stateChanged) {
       this.broadcastState()
@@ -200,7 +207,27 @@ export class BoardRoom extends Server<Env> {
 
   private async reload() {
     this.board = await loadBoard(db, this.name)
+    if (this.board) {
+      // Catches up on a deadline whose alarm gave up retrying. Not fatal
+      // here: the next alarm or reload tries again.
+      try {
+        this.pingNotified(
+          await notifyClosedDecisions(db, this.board, Date.now()),
+        )
+      } catch (error) {
+        console.error('Failed to send close notifications', error)
+      }
+    }
     await this.scheduleDeadline()
+  }
+
+  /** Tells anyone who just got a notification and has this board open. */
+  private pingNotified(userIds: Array<string>) {
+    for (const userId of userIds) {
+      for (const connection of this.getConnections(userId)) {
+        send(connection, { type: 'notifications' })
+      }
+    }
   }
 
   private broadcastState() {

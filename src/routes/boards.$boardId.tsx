@@ -23,6 +23,7 @@ import { ShareSheet } from '@/components/ShareSheet'
 import { Loader } from '@/components/Loader'
 import { NotFound } from '@/components/NotFound'
 import { AccountMenu } from '@/components/AccountMenu'
+import { NotificationBell } from '@/components/NotificationBell'
 import { Mascot } from '@/components/Mascot'
 import { PresenceStack } from '@/components/PresenceStack'
 import { SyncError, SyncStatus } from '@/components/SyncStatus'
@@ -200,6 +201,7 @@ function LiveBoard({
           ) : (
             <ShareButton />
           )}
+          <NotificationBell />
           <AccountMenu />
           {board.canAsk && (
             <button

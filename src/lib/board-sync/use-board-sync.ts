@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { BoardSyncClient } from './board-client'
 import { nextDeadline, toBoardDetails } from './reducer'
 import type { BoardSnapshot, BoardState } from './protocol'
-import { sessionQuery } from '@/data/queries'
+import { notificationQueries, sessionQuery } from '@/data/queries'
 import { ensureSession } from '@/server/boards'
 
 export function useBoardSync(
@@ -23,6 +23,10 @@ export function useBoardSync(
           await queryClient.invalidateQueries(sessionQuery)
           return session.viewerId
         },
+        onNotification: () =>
+          void queryClient.invalidateQueries({
+            queryKey: notificationQueries.all,
+          }),
       }),
   )
 

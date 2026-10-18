@@ -47,6 +47,7 @@ async function reloaded(boardId = 'board') {
     state: board.state,
     votes: Object.fromEntries(board.votesByUser),
     members: Object.fromEntries(board.members),
+    notifiedCloseAt: Object.fromEntries(board.notifiedCloseAt),
   }
 }
 
@@ -59,6 +60,7 @@ function inMemory(board: LoadedBoard) {
     state: board.state,
     votes: nonEmptyVotes,
     members: Object.fromEntries(board.members),
+    notifiedCloseAt: Object.fromEntries(board.notifiedCloseAt),
   }
 }
 
@@ -370,6 +372,7 @@ describe('renaming a board', () => {
       ok: true,
       stateChanged: true,
       myVotes: {},
+      notified: [],
     })
     expect(await reloaded()).toEqual(inMemory(board))
     expect(board.state.board.name).toBe('Team retreat')

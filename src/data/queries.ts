@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
+import type { NotificationList } from '@/lib/notifications'
 import {
   createBoard,
   deleteBoard,
@@ -12,6 +13,8 @@ import {
   getBoardSharing,
   getSessionInfo,
   listMyBoards,
+  listMyNotifications,
+  markMyNotificationsRead,
   resetBoardInvites,
   updateMemberRole,
 } from '@/server/boards'
@@ -43,6 +46,46 @@ export const boardQueries = {
       queryKey: ['boards', 'detail', boardId],
       queryFn: () => getBoard({ data: { boardId } }),
     }),
+}
+
+export const notificationQueries = {
+  /** Prefix for invalidating every notification query. */
+  all: ['notifications'] as const,
+  /** Keyed by viewer, so signing in or out never shows someone else's. */
+  list: (viewerId: string) =>
+    queryOptions({
+      queryKey: ['notifications', viewerId],
+      queryFn: () => listMyNotifications(),
+      refetchOnWindowFocus: 'always',
+    }),
+}
+
+/** Marks some notifications read, or all of them without `ids`. */
+export function useMarkNotificationsReadMutation(viewerId: string) {
+  const queryClient = useQueryClient()
+  const { queryKey } = notificationQueries.list(viewerId)
+  return useMutation({
+    mutationFn: (ids?: Array<string>) =>
+      markMyNotificationsRead({ data: { ids } }),
+    // The badge drops at once; the refetch below corrects any drift.
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey })
+      queryClient.setQueryData(queryKey, (list?: NotificationList) => {
+        if (!list) return list
+        const marking = (id: string) => !ids || ids.includes(id)
+        const newlyRead = list.items.filter(
+          (item) => !item.isRead && marking(item.id),
+        ).length
+        return {
+          items: list.items.map((item) =>
+            marking(item.id) ? { ...item, isRead: true } : item,
+          ),
+          unreadCount: ids ? Math.max(0, list.unreadCount - newlyRead) : 0,
+        }
+      })
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey }),
+  })
 }
 
 export function useCreateBoardMutation() {
